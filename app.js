@@ -2,7 +2,7 @@
 /* ============================================================
    ODO — app logic
    ============================================================ */
-const APP_VERSION = "v13";
+const APP_VERSION = "v14";
 
 /* ---------- tiny helpers ---------- */
 const $ = s => document.querySelector(s);
@@ -39,7 +39,12 @@ function relDay(s) {
 }
 
 /* ---------- constants ---------- */
-const TYPES = ["Homework", "Quiz", "Test", "Project", "Paper", "Reading", "Lab", "Other"];
+const TYPES = ["Homework", "Quiz", "Test", "Project", "Paper", "Reading", "Lab", "Personal", "Other"];
+const TYPE_COLOR_DEFAULTS = {
+  Test: "#e2654f", Quiz: "#d9a43c", Homework: "#56a7da", Project: "#9b82e2",
+  Paper: "#b96fcd", Reading: "#5fb36a", Lab: "#45b6a1", Personal: "#e272b2", Other: "#8fa3ad",
+};
+const typeColor = t => (S.typeColors && S.typeColors[t]) || TYPE_COLOR_DEFAULTS[t] || TYPE_COLOR_DEFAULTS.Other;
 const STATUSES = ["Not started", "In progress", "Done"];
 const COLORS = [
   "#e2654f", "#ec8c4e", "#d9a43c", "#9ab544",
@@ -83,13 +88,15 @@ const DEFAULTS = {
   routineCheckMeta: {}, // {'YYYY-MM-DD': lastModifiedTs}
   tags: {},          // {tagName: colorHex}
   tagsMeta: {},      // {tagName: lastModifiedTs}
+  typeColors: {},    // {assignmentType: colorHex} overrides
+  typeColorsU: 0,    // last modified ts for typeColors
   __m2: true,        // look-migration flag
   links: [            // {id,title,url,color,updatedAt,deleted}
     { id: "lk-gmail", title: "Gmail", url: "https://mail.google.com", color: "#b6543c", updatedAt: 1, deleted: false },
     { id: "lk-canvas", title: "Canvas", url: "https://canvas.instructure.com", color: "#5f7d54", updatedAt: 1, deleted: false },
   ],
   settings: {
-    theme: "auto", palette: "hearth", look: "paper", dashLayout: null, banner: "", userName: "",
+    theme: "auto", palette: "hearth", look: "paper", dashLayout: null, banner: "", userName: "", dueStyle: "dot",
     testLookahead: 14, weeksShown: 1,
     gcalClientId: "", gcalCalendarId: "", gcalHint: "",
     supaUrl: "", supaKey: "", syncId: "",
@@ -215,6 +222,34 @@ const TYPE_GLYPHS = {
 };
 const typeGlyph = (t, sz = 10) =>
   `<svg class="tg" width="${sz}" height="${sz}" viewBox="0 0 24 24" fill="currentColor">${TYPE_GLYPHS[t] || TYPE_GLYPHS.Other}</svg>`;
+const typeChip = (t, sz = 9) => {
+  const c = typeColor(t);
+  return `<span class="chip" style="background:color-mix(in srgb, ${c} 18%, var(--card));color:color-mix(in srgb, ${c} 62%, var(--ink))">${typeGlyph(t, sz)}${esc(t)}</span>`;
+};
+function typeColorEditor() {
+  openModal(`
+    <h2>Assignment colors</h2>
+    <p class="hint" style="margin:-8px 0 14px">One color per category, used everywhere — calendar dots, the week board, Coming up.</p>
+    ${TYPES.map((t, i) => `
+      <div class="field">
+        <label style="text-transform:none;letter-spacing:0">${typeChip(t, 10)}</label>
+        ${colorPickRow("tyc-" + i, typeColor(t))}
+      </div>`).join("")}
+    <div class="modal-actions">
+      <button class="btn ghost" id="tyc-reset">Reset defaults</button>
+      <span class="spacer"></span>
+      <button class="btn primary" id="tyc-done">Done</button>
+    </div>`);
+  TYPES.forEach((t, i) => wireColorPick("tyc-" + i, c => {
+    if (!c) return;
+    S.typeColors[t] = c;
+    S.typeColorsU = Date.now();
+    save();
+    typeColorEditor();
+  }));
+  $("#tyc-reset").onclick = () => { S.typeColors = {}; S.typeColorsU = Date.now(); save(); typeColorEditor(); };
+  $("#tyc-done").onclick = () => { closeModal(); render(); };
+}
 
 /* ---------- tags ---------- */
 function tagColor(name) {
@@ -327,7 +362,7 @@ function assignmentDetail(a) {
   openModal(`
     <h2 style="align-items:flex-start"><span>${esc(a.title)}</span></h2>
     <div style="display:flex;gap:7px;flex-wrap:wrap;margin:-6px 0 14px">
-      <span class="chip ${typeChipClass(a.type)}">${typeGlyph(a.type, 9)}${esc(a.type)}</span>
+      ${typeChip(a.type)}
       ${c ? `<span class="chip" style="background:${c.color}22;color:${c.color}">${esc(c.code || c.name)}</span>` : ""}
       <span class="chip ${a.status === "Done" ? "c-green" : "c-faint"}">${esc(a.status)}</span>
       ${over ? `<span class="chip" style="background:var(--accent-soft);color:var(--danger)">overdue</span>` : ""}
@@ -366,10 +401,14 @@ function greeting() {
 }
 function dueRowHtml(a) {
   const over = a.status !== "Done" && dayDiff(todayStr(), a.due) < 0;
-  return `<div class="duerow ${a.status === "Done" ? "done" : ""}" data-asg="${a.id}">
-    <span class="bar" style="background:${courseColor(a.courseId)}"></span>
+  const tc = typeColor(a.type);
+  const fill = S.settings.dueStyle === "fill";
+  const rowStyle = fill ? ` style="background:color-mix(in srgb, ${tc} 14%, var(--card));border-color:color-mix(in srgb, ${tc} 38%, var(--line))"` : "";
+  return `<div class="duerow ${a.status === "Done" ? "done" : ""}" data-asg="${a.id}"${rowStyle}>
+    <span class="bar" style="background:${tc}"></span>
+    ${fill ? "" : `<span class="duedot" style="background:${tc}"></span>`}
     <span class="t">${esc(a.title)}</span>
-    <span class="chip ${typeChipClass(a.type)}">${typeGlyph(a.type, 9)}${esc(a.type)}</span>
+    ${typeChip(a.type)}
     <span class="when" ${over ? 'style="color:var(--danger)"' : ""}>${relDay(a.due)}${a.time ? " " + fmtTime12(a.time) : ""}</span>
   </div>`;
 }
@@ -390,9 +429,9 @@ function dashCalHtml() {
     const evs = byDay[ds] || [];
     cells += `<div class="calcell ${inM ? "" : "dim"} ${ds === today ? "today" : ""}" data-mday="${ds}">
       <span class="dnum">${d.getDate()}</span>
-      ${evs.slice(0, 2).map(a => `<span class="calev ${a.status === "Done" ? "struck" : ""}" style="background:${courseColor(a.courseId)}">${typeGlyph(a.type, 9)}${esc(a.title)}</span>`).join("")}
+      ${evs.slice(0, 2).map(a => `<span class="calev ${a.status === "Done" ? "struck" : ""}" style="background:${typeColor(a.type)}">${typeGlyph(a.type, 9)}${esc(a.title)}</span>`).join("")}
       ${evs.length > 2 ? `<span class="calmore">+${evs.length - 2} more</span>` : ""}
-      <span class="dotbar">${evs.slice(0, 6).map(a => `<span class="evdot" style="background:${courseColor(a.courseId)};${a.status === "Done" ? "opacity:.35" : ""}"></span>`).join("")}</span>
+      <span class="dotbar">${evs.slice(0, 6).map(a => `<span class="evdot" style="background:${typeColor(a.type)};${a.status === "Done" ? "opacity:.35" : ""}"></span>`).join("")}</span>
     </div>`;
   }
   return `
@@ -466,7 +505,7 @@ function renderHome() {
       </div>`,
     calendar: dashCalHtml(),
     coming: `
-      <h2>Coming up</h2>
+      <h2>Coming up <button class="seemore" id="due-style-toggle">style: ${S.settings.dueStyle === "fill" ? "filled" : "dots"}</button></h2>
       <div class="dash-tabs">
         <button data-dtab="tomorrow" class="${UI.dashTab === "tomorrow" ? "active" : ""}">Due by tomorrow</button>
         <button data-dtab="week" class="${UI.dashTab === "week" ? "active" : ""}">Next 7 days</button>
@@ -520,6 +559,10 @@ function renderHome() {
     </div>`;
 
   $("#h-add").onclick = () => assignmentEditor(null);
+  $("#due-style-toggle").onclick = () => {
+    S.settings.dueStyle = S.settings.dueStyle === "fill" ? "dot" : "fill";
+    persist(); renderHome();
+  };
   $("#h-arrange").onclick = () => { UI.arrange = !UI.arrange; renderHome(); };
   $$("#view-home [data-arr]").forEach(b => b.onclick = e => {
     e.stopPropagation();
@@ -797,9 +840,10 @@ function taskCardHtml(t) {
 }
 function mainCardHtml(a) {
   const done = a.status === "Done";
-  return `<div class="tk main ${done ? "done" : ""}" data-id="${a.id}" data-kind="main">
+  const tc = typeColor(a.type);
+  return `<div class="tk main ${done ? "done" : ""}" data-id="${a.id}" data-kind="main" style="background:color-mix(in srgb, ${tc} 15%, var(--card));border-color:color-mix(in srgb, ${tc} 50%, var(--line));border-left:4px solid ${tc}">
     <span class="ck ${done ? "on" : ""}"><svg viewBox="0 0 24 24"><path d="M4 12.5 10 18.5 20 6"/></svg></span>
-    <span class="t">${esc(a.title)}<span class="sub">${typeGlyph(a.type, 8)} ${esc(a.type.toUpperCase())}${a.courseId ? " · " + esc(courseLabel(a.courseId)) : ""}${a.time ? " · " + fmtTime12(a.time) : ""}</span></span>
+    <span class="t" style="color:color-mix(in srgb, ${tc} 55%, var(--ink))">${esc(a.title)}<span class="sub" style="color:color-mix(in srgb, ${tc} 60%, var(--ink))">${typeGlyph(a.type, 8)} ${esc(a.type.toUpperCase())}${a.courseId ? " · " + esc(courseLabel(a.courseId)) : ""}${a.time ? " · " + fmtTime12(a.time) : ""}</span></span>
   </div>`;
 }
 function dayColHtml(day) {
@@ -1168,7 +1212,8 @@ function schedHtml(date, ckAttr, includeAnytime = true) {
   if (!anytime.length && !timed.length) return "";
   let html = "";
   if (includeAnytime && anytime.length) {
-    html += `<div class="sched-row"><span class="hr"></span><div class="si"><div class="sched-anytime">Anytime</div>${anytime.map(r => schedItemHtml(r, !!checks[r.id], ckAttr)).join("")}</div></div>`;
+    /* anytime items sit full-width, no hour gutter — tighter, especially on phones */
+    html += `<div style="margin-bottom:8px"><div class="sched-anytime">Anytime</div>${anytime.map(r => schedItemHtml(r, !!checks[r.id], ckAttr)).join("")}</div>`;
   }
   let lastHour = -1;
   for (const r of timed) {
@@ -1425,7 +1470,7 @@ function renderCalTable() {
         return `<div class="todo-row ${done ? "done" : ""}" data-asg="${a.id}">
           <span class="ck ${done ? "on" : ""}" data-ack="${a.id}" style="width:19px;height:19px"><svg viewBox="0 0 24 24"><path d="M4 12.5 10 18.5 20 6"/></svg></span>
           <span class="tt">${esc(a.title)}</span>
-          <span class="tags">${a.courseId ? `<span class="chip c-faint">${esc(courseLabel(a.courseId))}</span>` : ""}<span class="chip ${typeChipClass(a.type)}">${typeGlyph(a.type, 9)}${esc(a.type)}</span></span>
+          <span class="tags">${a.courseId ? `<span class="chip c-faint">${esc(courseLabel(a.courseId))}</span>` : ""}${typeChip(a.type)}</span>
           <span class="due-d">${niceDate(a.due)}${a.time ? " " + fmtTime12(a.time) : ""}</span>
           <span class="left-d ${dl ? dl.cls : ""}">${dl ? dl.txt : "done"}</span>
         </div>`;
@@ -1478,9 +1523,9 @@ function renderCalMonth() {
         const evs = byDay[ds] || [];
         return `<div class="calcell ${inMonth ? "" : "dim"} ${ds === today ? "today" : ""}" data-day="${ds}">
           <span class="dnum">${d.getDate()}</span>
-          ${evs.slice(0, 3).map(a => `<span class="calev ${a.status === "Done" ? "struck" : ""}" style="background:${courseColor(a.courseId)}">${typeGlyph(a.type, 9)}${esc(a.title)}</span>`).join("")}
+          ${evs.slice(0, 3).map(a => `<span class="calev ${a.status === "Done" ? "struck" : ""}" style="background:${typeColor(a.type)}">${typeGlyph(a.type, 9)}${esc(a.title)}</span>`).join("")}
           ${evs.length > 3 ? `<span class="calmore">+${evs.length - 3} more</span>` : ""}
-          <span class="dotbar">${evs.slice(0, 6).map(a => `<span class="evdot" style="background:${courseColor(a.courseId)};${a.status === "Done" ? "opacity:.35" : ""}"></span>`).join("")}</span>
+          <span class="dotbar">${evs.slice(0, 6).map(a => `<span class="evdot" style="background:${typeColor(a.type)};${a.status === "Done" ? "opacity:.35" : ""}"></span>`).join("")}</span>
         </div>`;
       }).join("")}
     </div>`;
@@ -1530,9 +1575,9 @@ function renderCalList() {
       ${list.length ? list.map(a => {
         const over = a.status !== "Done" && dayDiff(today, a.due) < 0;
         return `<div class="asgrow ${a.status === "Done" ? "done" : ""}" data-asg="${a.id}">
-          <span class="bar" style="background:${courseColor(a.courseId)}"></span>
+          <span class="bar" style="background:${typeColor(a.type)}"></span>
           <span class="t">${esc(a.title)}</span>
-          <span class="chip ${typeChipClass(a.type)}">${typeGlyph(a.type, 9)}${esc(a.type)}</span>
+          ${typeChip(a.type)}
           ${a.courseId ? `<span class="chip c-faint">${esc(courseLabel(a.courseId))}</span>` : ""}
           <span class="due ${over ? "over" : ""}">${relDay(a.due)}</span>
         </div>`;
@@ -1839,6 +1884,7 @@ function sharedState() {
   return {
     courses: S.courses, assignments: S.assignments, tasks: S.tasks,
     routines: S.routines, links: S.links, tags: S.tags, tagsMeta: S.tagsMeta,
+    typeColors: S.typeColors, typeColorsU: S.typeColorsU,
     routineChecks: S.routineChecks, routineCheckMeta: S.routineCheckMeta,
   };
 }
@@ -1869,6 +1915,11 @@ function mergeRemote(remote) {
       if (tMeta[name]) S.tagsMeta[name] = tMeta[name];
       changed = true;
     }
+  }
+  if ((remote.typeColorsU || 0) > (S.typeColorsU || 0)) {
+    S.typeColors = remote.typeColors || {};
+    S.typeColorsU = remote.typeColorsU;
+    changed = true;
   }
   return changed;
 }
@@ -2016,6 +2067,9 @@ function renderSettings() {
 
     <div class="card set-section">
       <h2>Planner</h2>
+      <div class="set-inline"><span>Assignment category colors</span>
+        <button class="btn small" id="st-typecolors">Edit colors</button>
+      </div>
       <div class="set-inline"><span>Show upcoming tests within</span>
         <select id="st-ahead" style="border:1.5px solid var(--line-strong);background:var(--card);color:var(--ink);border-radius:9px;padding:6px 10px;font-weight:700">
           ${[7, 14, 21, 28].map(n => `<option value="${n}" ${n === (s.testLookahead || 14) ? "selected" : ""}>${n} days</option>`).join("")}
@@ -2091,6 +2145,7 @@ function renderSettings() {
     reader.readAsDataURL(f);
   };
   $("#st-ahead").onchange = e => { s.testLookahead = +e.target.value; save(); };
+  $("#st-typecolors").onclick = typeColorEditor;
   /* auto-save sync fields as they're typed/pasted, so nothing is lost if the view re-renders */
   $("#st-gcid").oninput = e => { s.gcalClientId = e.target.value.trim(); tokenClient = null; persist(); };
   $("#st-surl").oninput = e => { s.supaUrl = e.target.value.trim(); persist(); };
@@ -2152,22 +2207,10 @@ function fixViewportHeight() {
   const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
   const standalone = navigator.standalone === true || matchMedia("(display-mode: standalone)").matches;
   const set = () => {
-    const vv = window.visualViewport;
-    let h = vv ? vv.height : window.innerHeight;
-    if (isIOS && standalone) {
-      const portrait = matchMedia("(orientation: portrait)").matches;
-      const sh = portrait ? Math.max(screen.width, screen.height) : Math.min(screen.width, screen.height);
-      if (sh > h) h = sh; /* take the bigger, truer number */
-    }
-    document.documentElement.style.setProperty("--vh", h + "px");
-    /* --bgap: how far iOS's pretend page-bottom sits above the REAL visible bottom.
-       Fixed elements anchor to the pretend bottom, so we push them down by the difference
-       (negative bottom). 0 on healthy browsers. */
-    const icb = document.documentElement.clientHeight;
-    const visBottom = Math.max(vv ? vv.offsetTop + vv.height : 0, h);
-    const gap = icb - visBottom;
-    document.documentElement.style.setProperty("--bgap", (gap < 0 ? gap : 0) + "px");
+    /* with input auto-zoom banned (maximum-scale=1 + 16px inputs), innerHeight is honest */
+    document.documentElement.style.setProperty("--vh", window.innerHeight + "px");
   };
+  void isIOS; void standalone;
   set();
   addEventListener("resize", set);
   window.visualViewport?.addEventListener("resize", set);
