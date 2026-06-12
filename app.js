@@ -1,7 +1,8 @@
 "use strict";
 /* ============================================================
-   HOMEROOM — app logic
+   ODO — app logic
    ============================================================ */
+const APP_VERSION = "v7";
 
 /* ---------- tiny helpers ---------- */
 const $ = s => document.querySelector(s);
@@ -1989,7 +1990,7 @@ function renderSettings() {
         <input type="file" id="st-file" accept=".json" style="display:none">
       </div>
     </div>
-    <div class="hint" style="text-align:center;padding:4px 0 20px">ODO · One Day, or Day One</div>`;
+    <div class="hint" style="text-align:center;padding:4px 0 20px">ODO ${APP_VERSION} · One Day, or Day One</div>`;
 
   $$("#st-theme button").forEach(b => b.onclick = () => {
     s.theme = b.dataset.t; persist(); applyTheme(); renderSettings();
