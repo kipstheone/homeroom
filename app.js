@@ -2,7 +2,7 @@
 /* ============================================================
    ODO — app logic
    ============================================================ */
-const APP_VERSION = "v0.16";
+const APP_VERSION = "v0.17";
 
 /* ---------- tiny helpers ---------- */
 const $ = s => document.querySelector(s);
