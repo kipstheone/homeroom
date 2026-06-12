@@ -2,7 +2,7 @@
 /* ============================================================
    ODO — app logic
    ============================================================ */
-const APP_VERSION = "v12";
+const APP_VERSION = "v13";
 
 /* ---------- tiny helpers ---------- */
 const $ = s => document.querySelector(s);
@@ -2152,20 +2152,30 @@ function fixViewportHeight() {
   const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
   const standalone = navigator.standalone === true || matchMedia("(display-mode: standalone)").matches;
   const set = () => {
-    let h = window.innerHeight;
+    const vv = window.visualViewport;
+    let h = vv ? vv.height : window.innerHeight;
     if (isIOS && standalone) {
       const portrait = matchMedia("(orientation: portrait)").matches;
       const sh = portrait ? Math.max(screen.width, screen.height) : Math.min(screen.width, screen.height);
       if (sh > h) h = sh; /* take the bigger, truer number */
     }
     document.documentElement.style.setProperty("--vh", h + "px");
+    /* --bgap: how far iOS's pretend page-bottom sits above the REAL visible bottom.
+       Fixed elements anchor to the pretend bottom, so we push them down by the difference
+       (negative bottom). 0 on healthy browsers. */
+    const icb = document.documentElement.clientHeight;
+    const visBottom = Math.max(vv ? vv.offsetTop + vv.height : 0, h);
+    const gap = icb - visBottom;
+    document.documentElement.style.setProperty("--bgap", (gap < 0 ? gap : 0) + "px");
   };
   set();
   addEventListener("resize", set);
+  window.visualViewport?.addEventListener("resize", set);
   addEventListener("orientationchange", () => { setTimeout(set, 100); setTimeout(set, 400); });
   addEventListener("pageshow", set);
   setTimeout(set, 300);
   setTimeout(set, 1200);
+  setInterval(set, 4000); /* cheap insurance against late iOS viewport shenanigans */
 }
 function initPullToRefresh() {
   const main = $("#main");

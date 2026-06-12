@@ -534,7 +534,7 @@ html{background:var(--bg)}
 .sched-anytime{font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint);padding:2px 0 4px}
 
 /* ---------- fab / banner / header highlights ---------- */
-#fab{display:none;position:absolute;right:18px;bottom:calc(88px + env(safe-area-inset-bottom));width:56px;height:56px;border-radius:50%;background:var(--accent);color:#fff;align-items:center;justify-content:center;box-shadow:var(--shadow-lift);z-index:45;border:none}
+#fab{display:none;position:fixed;right:18px;bottom:calc(88px + env(safe-area-inset-bottom) + var(--bgap,0px));width:56px;height:56px;border-radius:50%;background:var(--accent);color:#fff;align-items:center;justify-content:center;box-shadow:var(--shadow-lift);z-index:45;border:none}
 #fab:active{transform:scale(.93)}
 [data-theme="dark"] #fab{color:#16110d}
 #fab.hidden{display:none!important}
@@ -566,7 +566,7 @@ html{background:var(--bg)}
   .viewhead .btn.primary{display:none} /* FAB replaces it */
   #ptr-hint{display:block}
   #tabbar{
-    display:flex;position:absolute;bottom:0;left:0;right:0;z-index:40;
+    display:flex;position:fixed;bottom:var(--bgap,0px);left:0;right:0;z-index:40;
     background:color-mix(in srgb,var(--card) 88%,transparent);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
     border-top:1px solid var(--line);padding:7px 6px calc(7px + env(safe-area-inset-bottom));
     justify-content:space-around;
