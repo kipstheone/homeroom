@@ -85,7 +85,8 @@ body{
   height:100%;
   font-size:15.5px;
   line-height:1.45;
-  overscroll-behavior-y:none;
+  overscroll-behavior:none;
+  overflow:hidden;
   transition:background .25s ease,color .25s ease;
 }
 ::selection{background:var(--accent-soft)}
@@ -116,7 +117,7 @@ img{user-select:none}
 #syncpill .led{width:7px;height:7px;border-radius:50%;background:var(--ink-faint);flex-shrink:0}
 #syncpill.on .led{background:var(--green)}
 #syncpill.err .led{background:var(--danger)}
-#main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:26px 30px calc(30px + env(safe-area-inset-bottom))}
+#main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:26px 30px calc(30px + env(safe-area-inset-bottom))}
 .view{display:none;max-width:1060px;margin:0 auto}
 .view.active{display:block;animation:fadein .18s ease}
 @keyframes fadein{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
@@ -238,7 +239,7 @@ img{user-select:none}
 .tk{
   display:flex;align-items:flex-start;gap:8px;padding:8px 9px;border-radius:10px;
   background:var(--card-2);border:1px solid var(--line);cursor:grab;user-select:none;
-  -webkit-user-select:none;touch-action:none;position:relative;
+  -webkit-user-select:none;touch-action:pan-y;position:relative;
 }
 .tk:active{cursor:grabbing}
 .tk .t{font-size:13.5px;font-weight:600;line-height:1.3;word-break:break-word;flex:1;padding-top:1px}
@@ -422,6 +423,28 @@ img{user-select:none}
 .palettepick .pp-sw{width:15px;height:15px;border-radius:50% 50% 50% 4px;transform:rotate(8deg)}
 
 /* ---------- looks (whole-app styles) ---------- */
+[data-look="paper"]{
+  --font-display:"Fraunces",Georgia,serif;--font-body:"Inter","Karla",sans-serif;
+  --r:12px;--r-sm:8px;
+  --bg:#ffffff;--bg-soft:#f6f6f3;--card:#ffffff;--card-2:#f8f8f5;
+  --ink:#26241f;--ink-soft:#6f6c64;--ink-faint:#a6a299;
+  --line:#ebeae5;--line-strong:#d8d6cf;
+  --shadow:0 1px 2px rgba(0,0,0,.04),0 4px 14px -6px rgba(0,0,0,.07);
+  --shadow-lift:0 4px 10px rgba(0,0,0,.05),0 14px 30px -10px rgba(0,0,0,.14);
+}
+[data-theme="dark"][data-look="paper"]{
+  --bg:#191919;--bg-soft:#212121;--card:#1f1f1f;--card-2:#272726;
+  --ink:#e9e7e3;--ink-soft:#a9a6a0;--ink-faint:#74716b;
+  --line:#2f2f2e;--line-strong:#403f3d;
+  --shadow:0 1px 2px rgba(0,0,0,.35),0 6px 18px -6px rgba(0,0,0,.5);
+  --shadow-lift:0 2px 4px rgba(0,0,0,.45),0 14px 34px -10px rgba(0,0,0,.65);
+}
+[data-look="paper"] .card{box-shadow:none}
+[data-look="paper"] .card:hover{box-shadow:var(--shadow)}
+[data-look="paper"] .coursecard:hover{transform:translateY(-2px);box-shadow:var(--shadow-lift)}
+[data-look="paper"] .linkchip:hover{transform:translateY(-1px)}
+[data-look="paper"] .logo .dot,[data-look="paper"] .linkchip .lk-dot,[data-look="paper"] .palettepick .pp-sw{border-radius:4px;transform:none}
+
 [data-look="modern"]{--font-display:"Inter","Karla",sans-serif;--font-body:"Inter","Karla",sans-serif;--r:10px;--r-sm:7px;--shadow:0 1px 2px rgba(0,0,0,.05),0 4px 10px -4px rgba(0,0,0,.09);--shadow-lift:0 4px 18px -4px rgba(0,0,0,.16)}
 [data-look="modern"] h1,[data-look="modern"] h2,[data-look="modern"] h3,[data-look="modern"] .logo,[data-look="modern"] .mc-title{font-weight:800;letter-spacing:-.02em}
 [data-look="modern"] .squiggle{display:none}
@@ -458,6 +481,64 @@ img{user-select:none}
 [data-theme="dark"] .arrbar button.on{color:#16110d}
 .arrsep{width:10px}
 
+/* ---------- to-do table ---------- */
+.todo-table{display:flex;flex-direction:column}
+.todo-head,.todo-row{display:grid;grid-template-columns:26px minmax(0,1fr) auto auto auto;gap:10px;align-items:center;padding:9px 8px}
+.todo-head{font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint);border-bottom:1.5px solid var(--line-strong);padding-bottom:6px}
+.todo-row{border-bottom:1px solid var(--line);cursor:pointer}
+.todo-row:hover{background:var(--bg-soft)}
+.todo-row .tt{font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.todo-row .tt .desc-dot{color:var(--ink-faint);font-weight:400;font-size:12px}
+.todo-row.done .tt{text-decoration:line-through;color:var(--ink-faint)}
+.todo-row .tags{display:flex;gap:5px;flex-wrap:wrap;max-width:200px;justify-content:flex-end}
+.tagchip{font-size:11px;font-weight:700;padding:2.5px 9px;border-radius:6px;white-space:nowrap}
+.todo-row .due-d{font-size:12.5px;color:var(--ink-soft);font-weight:600;white-space:nowrap;text-align:right;min-width:74px}
+.todo-row .left-d{font-size:11.5px;font-weight:800;white-space:nowrap;text-align:right;min-width:62px;color:var(--ink-faint)}
+.todo-row .left-d.urgent{color:var(--danger)}
+.todo-row .left-d.soon{color:var(--accent-ink)}
+.todo-row .lkico{color:var(--ink-faint)}
+.todo-row .lkico:hover{color:var(--accent-ink)}
+.todo-new{display:flex;align-items:center;gap:8px;padding:10px 8px;color:var(--ink-faint);font-weight:600;font-size:14px;cursor:pointer;border-radius:8px}
+.todo-new:hover{background:var(--bg-soft);color:var(--ink-soft)}
+.mini-todo{display:grid;grid-template-columns:24px minmax(0,1fr) auto auto;gap:9px;align-items:center;padding:7px 6px;border-bottom:1px solid var(--line)}
+.mini-todo:last-child{border-bottom:none}
+.mini-todo .tt{font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}
+.mini-todo.done .tt{text-decoration:line-through;color:var(--ink-faint)}
+
+/* ---------- daily schedule ---------- */
+.sched{display:flex;flex-direction:column}
+.sched-row{display:flex;gap:11px;align-items:flex-start;padding:4px 0;border-top:1px solid var(--line)}
+.sched-row:first-child{border-top:none}
+.sched-row .hr{width:56px;flex-shrink:0;font-size:11.5px;font-weight:800;color:var(--ink-faint);text-align:right;padding-top:8px;font-variant-numeric:tabular-nums}
+.sched-row .si{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px;padding:4px 0}
+.classblock{
+  display:flex;align-items:center;gap:9px;border-radius:9px;padding:8px 12px;color:#fff;
+  font-weight:700;font-size:13.5px;cursor:pointer;
+}
+.classblock .range{font-size:11px;font-weight:800;opacity:.85;white-space:nowrap;margin-left:auto}
+.classblock.done{opacity:.5}
+.classblock.done .cbt{text-decoration:line-through}
+.classblock .ck{background:transparent;border-color:rgba(255,255,255,.7);width:18px;height:18px;border-radius:6px}
+.classblock .ck svg{width:11px;height:11px}
+.classblock .ck.on{background:rgba(255,255,255,.25);border-color:#fff}
+.routline{display:flex;align-items:center;gap:9px;padding:5px 2px;font-size:14px;cursor:pointer;border-radius:7px}
+.routline:hover{background:var(--bg-soft)}
+.routline .ck{width:18px;height:18px;border-radius:6px}
+.routline .ck svg{width:11px;height:11px}
+.routline.done .rt{text-decoration:line-through;color:var(--ink-faint)}
+.routline .rtime{font-size:11px;font-weight:800;color:var(--ink-faint);margin-left:auto;white-space:nowrap}
+.sched-anytime{font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint);padding:2px 0 4px}
+
+/* ---------- fab / banner / header highlights ---------- */
+#fab{display:none;position:fixed;right:18px;bottom:calc(88px + env(safe-area-inset-bottom));width:56px;height:56px;border-radius:50%;background:var(--accent);color:#fff;align-items:center;justify-content:center;box-shadow:var(--shadow-lift);z-index:45;border:none}
+#fab:active{transform:scale(.93)}
+[data-theme="dark"] #fab{color:#16110d}
+#fab.hidden{display:none!important}
+.banner{width:100%;height:160px;object-fit:cover;border-radius:var(--r);margin-bottom:18px;display:block}
+.dashpanel.hl-on>h2,.dashpanel.hl-on>.mc-head{background:var(--hl);color:#454440;padding:6px 11px;border-radius:8px;margin-bottom:12px}
+.dashpanel.hl-on>h2 .seemore{color:#71706b}
+.dashpanel.hl-on>.mc-head .mc-title{color:#454440}
+
 /* ---------- custom course boxes ---------- */
 .customrow{align-items:flex-start}
 .customrow .iconbtn{margin-top:24px;flex-shrink:0}
@@ -465,7 +546,14 @@ img{user-select:none}
 /* ---------- mobile ---------- */
 @media(max-width:720px){
   #sidebar{display:none}
-  #main{padding:18px 14px calc(86px + env(safe-area-inset-bottom))}
+  #main{padding:calc(14px + env(safe-area-inset-top)) 14px calc(96px + env(safe-area-inset-bottom))}
+  #fab{display:flex}
+  .banner{height:110px;margin-top:2px}
+  .todo-head{display:none}
+  .todo-row{grid-template-columns:26px minmax(0,1fr) auto auto}
+  .todo-row .tags{display:none}
+  .todo-row .due-d{min-width:0}
+  .viewhead .btn.primary{display:none} /* FAB replaces it */
   #tabbar{
     display:flex;position:fixed;bottom:0;left:0;right:0;z-index:40;
     background:color-mix(in srgb,var(--card) 88%,transparent);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
@@ -497,8 +585,8 @@ img{user-select:none}
   <aside id="sidebar">
     <div class="logo"><span class="dot"></span>Homeroom</div>
     <button class="navbtn" data-nav="home"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 10 9-7 9 7v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/><path d="M9 22V12h6v10"/></svg>Home</button>
-    <button class="navbtn" data-nav="week"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/></svg>Week</button>
-    <button class="navbtn" data-nav="routine"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Routine</button>
+    <button class="navbtn" data-nav="routine"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Daily</button>
+    <button class="navbtn" data-nav="week"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h13M3 12h13M3 18h13"/><path d="m19 5 2 2-2 2"/></svg>To-dos</button>
     <button class="navbtn" data-nav="calendar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4M16 2v4M3 10h18"/><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M8 15h2v2H8z"/></svg>Calendar</button>
     <button class="navbtn" data-nav="courses"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c0 1.7 2.7 3 6 3s6-1.3 6-3v-5"/></svg>Courses</button>
     <button class="navbtn" data-nav="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v3M12 20v3M4.2 4.2l2.2 2.2M17.6 17.6l2.2 2.2M1 12h3M20 12h3M4.2 19.8l2.2-2.2M17.6 6.4l2.2-2.2"/></svg>Settings</button>
@@ -519,13 +607,15 @@ img{user-select:none}
 
   <nav id="tabbar">
     <button data-nav="home"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 10 9-7 9 7v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/><path d="M9 22V12h6v10"/></svg>Home</button>
-    <button data-nav="week"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/></svg>Week</button>
-    <button data-nav="routine"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Routine</button>
+    <button data-nav="routine"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Daily</button>
+    <button data-nav="week"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h13M3 12h13M3 18h13"/><path d="m19 5 2 2-2 2"/></svg>To-dos</button>
     <button data-nav="calendar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4M16 2v4M3 10h18"/><rect x="3" y="4" width="18" height="18" rx="2"/></svg>Cal</button>
     <button data-nav="courses"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c0 1.7 2.7 3 6 3s6-1.3 6-3v-5"/></svg>Courses</button>
     <button data-nav="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v3M12 20v3M4.2 4.2l2.2 2.2M17.6 17.6l2.2 2.2M1 12h3M20 12h3M4.2 19.8l2.2-2.2M17.6 6.4l2.2-2.2"/></svg>More</button>
   </nav>
 </div>
+
+<button id="fab" aria-label="add new"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
 
 <div id="modal-veil"><div id="modal" role="dialog"></div></div>
 <div id="toast"></div>

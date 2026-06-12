@@ -88,11 +88,11 @@ Security note: anyone who had your URL, key, *and* sync code could read that row
 ## Everyday use, in 30 seconds
 
 - **Home** — today at a glance: quick links (edit them to point at Gmail, Canvas, anything), a full month calendar with named assignments, what's due, tests on the horizon, your routine (checkable right there), your courses. Hit **Arrange** to move any panel between the wide top area and the two columns, or reorder them — the layout is yours.
-- **Week** — the Tweek-style board. Drag tasks between days, check them off, park ideas in Someday. Assignments show up automatically in terracotta; finishing one asks "are you sure?" on purpose.
-- **Routine** — your daily rhythm per weekday. Drag to reorder as the day mutates.
-- **Master Calendar** — month view of every deadline, plus the full sortable list with course/type filters.
+- **Daily** — your day's rhythm per weekday: "Anytime" routines up top (drag to reorder), then a timed schedule. Classes get solid colored blocks with time ranges; routines stay light. Check things off as you go.
+- **To-dos** — a Notion-style table by default: due date, auto-updating days-left, color-coded tags, descriptions, links, checkboxes. Switch to the Tweek-style week board anytime to drag things between days; Someday lives there too.
+- **Master Calendar** — month view of every deadline, a month table view (assignment, course, type, due, days left), plus the full sortable list with filters.
 - **Courses** — the binder. Click any course for office hours, grading scheme, syllabus link, all of it.
 
-Personalization: tasks, routines, and quick links each take a color tag from a 16-color set (open one to pick); colored routines glow in their color. Every assignment type has its own symbol — triangle for tests, diamond for quizzes, circle for homework, book for readings, flask for labs — wherever assignments appear. Courses take unlimited custom info boxes (your own label + text). Settings has light/dark/auto, five color palettes (Hearth, Meadow, Tide, Dusk, Ember), and four whole-app Looks — Cozy, Modern, Retro, Bubbly — that change fonts, shapes, and shadows entirely. Mix and match freely.
+Personalization: to-dos, routines, and quick links take colors from a bright 16-color set; to-dos also take reusable tags that auto-color like Notion's. Every assignment type has its own symbol — triangle for tests, diamond for quizzes, circle for homework, book for readings, flask for labs. Courses take unlimited custom info boxes. In Arrange mode, each dashboard panel's header can take a pastel highlight color ("Color" button), and Settings lets you add a custom banner image to the dashboard. Settings has light/dark/auto, five color palettes, and five whole-app Looks — Paper (the white, modern-cozy default), Cozy (the warm library original), Modern, Retro, Bubbly. On the phone, the round + button in the corner adds whatever the current page holds.
 
 Everything works offline; syncing catches up when you're back online. Timezones come from your device automatically.

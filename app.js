@@ -41,13 +41,14 @@ function relDay(s) {
 const TYPES = ["Homework", "Quiz", "Test", "Project", "Paper", "Reading", "Lab", "Other"];
 const STATUSES = ["Not started", "In progress", "Done"];
 const COLORS = [
-  "#b6543c", "#c97a3a", "#b98a2e", "#8a8f3c",
-  "#5f7d54", "#3e7f78", "#4f8fa3", "#4f6d8f",
-  "#5d5fa0", "#7d5a78", "#a05a8c", "#c2698a",
-  "#a84b4b", "#8a6a52", "#6e7480", "#52584a",
+  "#e2654f", "#ec8c4e", "#d9a43c", "#9ab544",
+  "#5fb36a", "#45b6a1", "#56a7da", "#6c8de0",
+  "#9b82e2", "#b96fcd", "#e272b2", "#ed8092",
+  "#b6543c", "#5f7d54", "#8a6a52", "#6e7480",
 ];
 const COURSE_COLORS = COLORS;
 const TAG_COLORS = COLORS;
+const HL_COLORS = ["", "#e3edf7", "#fdeae6", "#fbf3d9", "#e7f2e3", "#f2ebf6", "#fbe8f0", "#efefec"];
 const PALETTES = [
   { id: "hearth", name: "Hearth", swatch: "#b6543c" },
   { id: "meadow", name: "Meadow", swatch: "#5c7f52" },
@@ -56,6 +57,7 @@ const PALETTES = [
   { id: "ember", name: "Ember", swatch: "#a87b24" },
 ];
 const LOOKS = [
+  { id: "paper", name: "Paper", desc: "white, modern-cozy, Notion-ish" },
   { id: "cozy", name: "Cozy", desc: "warm serif, library corners" },
   { id: "modern", name: "Modern", desc: "clean sans, crisp edges" },
   { id: "retro", name: "Retro", desc: "chunky print-shop borders" },
@@ -78,12 +80,14 @@ const DEFAULTS = {
   routines: [],      // {id,title,time,days:[0-6],order,updatedAt,deleted}
   routineChecks: {}, // {'YYYY-MM-DD': {routineId:true, ...}}
   routineCheckMeta: {}, // {'YYYY-MM-DD': lastModifiedTs}
+  tags: {},          // {tagName: colorHex}
+  __m2: true,        // look-migration flag
   links: [            // {id,title,url,color,updatedAt,deleted}
     { id: "lk-gmail", title: "Gmail", url: "https://mail.google.com", color: "#b6543c", updatedAt: 1, deleted: false },
     { id: "lk-canvas", title: "Canvas", url: "https://canvas.instructure.com", color: "#5f7d54", updatedAt: 1, deleted: false },
   ],
   settings: {
-    theme: "auto", palette: "hearth", look: "cozy", dashLayout: null,
+    theme: "auto", palette: "hearth", look: "paper", dashLayout: null, banner: "",
     testLookahead: 14, weeksShown: 1,
     gcalClientId: "", gcalCalendarId: "",
     supaUrl: "", supaKey: "", syncId: "",
@@ -95,10 +99,12 @@ function loadState() {
     const raw = localStorage.getItem("homeroom_v1");
     if (raw) {
       const o = JSON.parse(raw);
-      return {
+      const st = {
         ...structuredClone(DEFAULTS), ...o,
         settings: { ...DEFAULTS.settings, ...(o.settings || {}) },
       };
+      if (!o.__m2) { st.settings.look = "paper"; st.__m2 = true; } /* one-time: new default look */
+      return st;
     }
   } catch (e) { console.warn("state load failed", e); }
   return structuredClone(DEFAULTS);
@@ -115,7 +121,7 @@ const UI = {
   view: "home", dashTab: "tomorrow", boardOffset: 0,
   routineDate: todayStr(), calMonth: null, calMode: "month",
   asgCourse: "all", asgType: "all", asgHideDone: false,
-  homeCal: null, linkEdit: false,
+  homeCal: null, linkEdit: false, arrange: false, weekMode: "list",
 };
 
 /* ---------- theme ---------- */
@@ -165,6 +171,19 @@ function nav(view) {
   UI.view = view;
   $$("[data-nav]").forEach(b => b.classList.toggle("active", b.dataset.nav === view));
   $$(".view").forEach(v => v.classList.toggle("active", v.id === "view-" + view));
+  /* mobile floating add button */
+  const fabActions = {
+    home: () => assignmentEditor(null),
+    week: () => taskEditor(null),
+    routine: () => routineEditor(null, parseDate(UI.routineDate).getDay()),
+    calendar: () => assignmentEditor(null),
+    courses: () => courseEditor(null),
+  };
+  const fab = $("#fab");
+  if (fab) {
+    fab.classList.toggle("hidden", !fabActions[view]);
+    fab.onclick = fabActions[view] || null;
+  }
   render();
   $("#main").scrollTop = 0;
 }
@@ -192,6 +211,30 @@ const TYPE_GLYPHS = {
 };
 const typeGlyph = (t, sz = 10) =>
   `<svg class="tg" width="${sz}" height="${sz}" viewBox="0 0 24 24" fill="currentColor">${TYPE_GLYPHS[t] || TYPE_GLYPHS.Other}</svg>`;
+
+/* ---------- tags ---------- */
+function tagColor(name) {
+  if (!S.tags[name]) {
+    S.tags[name] = TAG_COLORS[Object.keys(S.tags).length % TAG_COLORS.length];
+    persist();
+  }
+  return S.tags[name];
+}
+function tagChip(name) {
+  const c = tagColor(name);
+  return `<span class="tagchip" style="background:color-mix(in srgb, ${c} 20%, var(--card));color:color-mix(in srgb, ${c} 62%, var(--ink))">${esc(name)}</span>`;
+}
+function parseTags(str) {
+  return [...new Set(String(str || "").split(",").map(s => s.trim()).filter(Boolean))].slice(0, 8);
+}
+function daysLeftLabel(due) {
+  const d = dayDiff(todayStr(), due);
+  if (d < 0) return { txt: Math.abs(d) + " over", cls: "urgent" };
+  if (d === 0) return { txt: "due today", cls: "urgent" };
+  if (d === 1) return { txt: "1 day", cls: "soon" };
+  if (d <= 3) return { txt: d + " days", cls: "soon" };
+  return { txt: d + " days", cls: "" };
+}
 
 /* ============================================================
    ASSIGNMENTS (Main Tasks)
@@ -349,6 +392,8 @@ function arrBar(area) {
     <button data-arr="left" class="${area === "left" ? "on" : ""}" title="left column">L</button>
     <button data-arr="top" class="${area === "top" ? "on" : ""}" title="full width">W</button>
     <button data-arr="right" class="${area === "right" ? "on" : ""}" title="right column">R</button>
+    <span class="arrsep"></span>
+    <button data-arr="hl" title="header color">Color</button>
   </div>`;
 }
 function renderHome() {
@@ -362,11 +407,12 @@ function renderHome() {
     tests: open.filter(a => (a.type === "Test" || a.type === "Quiz") && dayDiff(today, a.due) >= 0 && dayDiff(today, a.due) <= lookahead),
   };
   const list = tabs[UI.dashTab] || tabs.tomorrow;
-  const myTasks = alive(S.tasks).filter(t => !t.done && t.day !== "someday" && dayDiff(today, t.day) >= 0 && dayDiff(today, t.day) <= 7)
-    .sort((a, b) => a.day.localeCompare(b.day) || a.order - b.order).slice(0, 6);
+  const tkey = t => t.day === "someday" ? "9999-99-99" : t.day;
+  const myTasks = alive(S.tasks).filter(t => !t.done)
+    .sort((a, b) => tkey(a).localeCompare(tkey(b)) || a.order - b.order).slice(0, 7);
   const dow = parseDate(today).getDay();
-  const checks = S.routineChecks[today] || {};
-  const routs = alive(S.routines).filter(r => r.days.includes(dow)).sort((a, b) => a.order - b.order);
+  const daily = dailyItems(dow);
+  const hasDaily = daily.anytime.length || daily.timed.length;
   const courses = alive(S.courses);
   const links = alive(S.links);
   const lay = dashLayout();
@@ -397,26 +443,28 @@ function renderHome() {
       ${courses.length ? `<div class="coursegrid">${courses.map(c => courseCardHtml(c)).join("")}</div>`
         : `<div class="empty">No courses yet — add them in the Courses tab.</div>`}`,
     routine: `
-      <h2>Today's routine <button class="seemore" data-go="routine">open</button></h2>
-      ${routs.length ? `<div class="routpreview">${routs.map(r => `
-        <div class="rp ${checks[r.id] ? "done" : ""}" data-hrck="${r.id}"${(r.color && !checks[r.id]) ? ` style="background:color-mix(in srgb, ${esc(r.color)} 14%, transparent)"` : ""}>
-          <span class="ck ${checks[r.id] ? "on" : ""}"><svg viewBox="0 0 24 24"><path d="M4 12.5 10 18.5 20 6"/></svg></span>
-          <span class="tm">${r.time ? fmtTime12(r.time) : "—"}</span>
-          ${esc(r.title)}
-        </div>`).join("")}</div>`
+      <h2>Today <button class="seemore" data-go="routine">open</button></h2>
+      ${hasDaily ? schedHtml(today, "data-hrck", true)
         : `<div class="empty">No routine set for ${DOW_FULL[dow]}s.</div>`}`,
     weektasks: `
-      <h2>This week's tasks <button class="seemore" data-go="week">board</button></h2>
-      ${myTasks.length ? `<div class="duelist">${myTasks.map(t => `
-        <div class="duerow" data-go="week"><span class="bar" style="background:${t.color || "var(--line-strong)"}"></span>
-        <span class="t">${esc(t.title)}</span><span class="when">${relDay(t.day)}</span></div>`).join("")}</div>`
+      <h2>To-dos <button class="seemore" data-go="week">all</button></h2>
+      ${myTasks.length ? `<div>${myTasks.map(t => {
+        const dl = (t.day !== "someday") ? daysLeftLabel(t.day) : null;
+        return `<div class="mini-todo ${t.done ? "done" : ""}">
+          <span class="ck ${t.done ? "on" : ""}" data-tck="${t.id}" style="width:18px;height:18px"><svg viewBox="0 0 24 24"><path d="M4 12.5 10 18.5 20 6"/></svg></span>
+          <span class="tt" data-tedit="${t.id}">${esc(t.title)}</span>
+          <span style="font-size:12px;color:var(--ink-soft);font-weight:600;white-space:nowrap">${t.day === "someday" ? "someday" : relDay(t.day)}</span>
+          <span class="left-d ${dl ? dl.cls : ""}" style="font-size:11px;font-weight:800;min-width:54px;text-align:right">${dl ? dl.txt : ""}</span>
+        </div>`;
+      }).join("")}</div>`
         : `<div class="empty">${emptyLine(2 + parseDate(today).getDate())}</div>`}`,
   };
-  const wrap = id => `<div class="card panel dashpanel ${UI.arrange ? "arranging" : ""}" data-panel="${id}">
+  const wrap = id => `<div class="card panel dashpanel ${UI.arrange ? "arranging" : ""} ${lay[id].hl ? "hl-on" : ""}" data-panel="${id}"${lay[id].hl ? ` style="--hl:${lay[id].hl}"` : ""}>
     ${UI.arrange ? arrBar(lay[id].area) : ""}${panels[id]}</div>`;
   const inArea = a => DASH_PANELS.filter(id => lay[id].area === a).sort((x, y) => lay[x].ord - lay[y].ord);
 
   $("#view-home").innerHTML = `
+    ${S.settings.banner ? `<img class="banner" src="${S.settings.banner}" alt="">` : ""}
     <div class="viewhead">
       <div>
         <h1>${g.part}, Sean.</h1>
@@ -441,7 +489,10 @@ function renderHome() {
     const id = b.closest("[data-panel]").dataset.panel;
     const cur = dashLayout();
     const act = b.dataset.arr;
-    if (act === "up" || act === "down") {
+    if (act === "hl") {
+      const cycle = HL_COLORS;
+      cur[id].hl = cycle[(cycle.indexOf(cur[id].hl || "") + 1) % cycle.length];
+    } else if (act === "up" || act === "down") {
       const peers = DASH_PANELS.filter(p => cur[p].area === cur[id].area).sort((x, y) => cur[x].ord - cur[y].ord);
       const i = peers.indexOf(id);
       const j = act === "up" ? i - 1 : i + 1;
@@ -477,14 +528,21 @@ function renderHome() {
     const l = S.links.find(x => x.id === b.dataset.lkedit);
     if (l) linkEditor(l);
   });
-  /* routine check-off from home */
-  $$("#view-home [data-hrck]").forEach(row => row.onclick = () => {
-    const id = row.dataset.hrck;
-    S.routineChecks[today] = S.routineChecks[today] || {};
-    if (S.routineChecks[today][id]) delete S.routineChecks[today][id];
-    else S.routineChecks[today][id] = true;
-    S.routineCheckMeta[today] = Date.now();
-    save(); renderHome();
+  /* routine check-off from home (checkbox or whole row) */
+  $$("#view-home [data-hrck]").forEach(ck => ck.onclick = e => {
+    e.stopPropagation();
+    toggleRoutCheck(today, ck.dataset.hrck);
+    renderHome();
+  });
+  $$("#view-home [data-sched]").forEach(row => row.onclick = () => {
+    toggleRoutCheck(today, row.dataset.sched);
+    renderHome();
+  });
+  /* to-dos on home */
+  $$("#view-home [data-tck]").forEach(ck => ck.onclick = e => { e.stopPropagation(); toggleTaskDone(ck.dataset.tck); });
+  $$("#view-home [data-tedit]").forEach(el => el.onclick = () => {
+    const t = S.tasks.find(x => x.id === el.dataset.tedit);
+    if (t) taskEditor(t);
   });
 }
 function linkEditor(l) {
@@ -689,7 +747,61 @@ function dayColHtml(day) {
     <button class="addtask">+ add task</button>
   </div>`;
 }
-function renderWeek() {
+function renderWeek() { (UI.weekMode === "board" ? renderBoard : renderTodoList)(); }
+function weekModeSeg() {
+  return `<div class="seg" id="wm-seg">
+    <button data-wm="list" class="${UI.weekMode !== "board" ? "active" : ""}">List</button>
+    <button data-wm="board" class="${UI.weekMode === "board" ? "active" : ""}">Week board</button>
+  </div>`;
+}
+function wireWeekSeg() {
+  $$("#wm-seg button").forEach(b => b.onclick = () => { UI.weekMode = b.dataset.wm; renderWeek(); });
+}
+function todoRowHtml(t) {
+  const dated = t.day !== "someday";
+  const dl = (dated && !t.done) ? daysLeftLabel(t.day) : null;
+  return `<div class="todo-row ${t.done ? "done" : ""}" data-tid="${t.id}">
+    <span class="ck ${t.done ? "on" : ""}" data-tck="${t.id}" style="width:19px;height:19px"><svg viewBox="0 0 24 24"><path d="M4 12.5 10 18.5 20 6"/></svg></span>
+    <span class="tt">${esc(t.title)}${t.url ? ` <a class="lkico" href="${esc(t.url)}" target="_blank" rel="noopener" data-stop><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1.5 1.5"/><path d="M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1.5-1.5"/></svg></a>` : ""}${t.notes ? ` <span class="desc-dot">— ${esc(t.notes.length > 56 ? t.notes.slice(0, 56) + "…" : t.notes)}</span>` : ""}</span>
+    <span class="tags">${(t.tags || []).map(tagChip).join("")}</span>
+    <span class="due-d">${dated ? niceDate(t.day) : "someday"}</span>
+    <span class="left-d ${dl ? dl.cls : ""}">${dl ? dl.txt : (t.done ? "done" : "—")}</span>
+  </div>`;
+}
+function renderTodoList() {
+  const ts = alive(S.tasks);
+  const key = t => t.day === "someday" ? "9999-99-99" : t.day;
+  const open = ts.filter(t => !t.done).sort((a, b) => key(a).localeCompare(key(b)) || a.order - b.order);
+  const done = ts.filter(t => t.done).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)).slice(0, 25);
+  $("#view-week").innerHTML = `
+    <div class="viewhead">
+      <div><h1>To-dos</h1><div class="sub">Everything you owe yourself, in one list.</div></div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        ${weekModeSeg()}
+        <button class="btn primary" id="td-add">+ To-do</button>
+      </div>
+    </div>
+    <div class="card panel">
+      <div class="todo-table">
+        <div class="todo-head"><span></span><span>To-do</span><span style="text-align:right">Tags</span><span style="text-align:right">Due</span><span style="text-align:right">Days left</span></div>
+        ${open.length ? open.map(todoRowHtml).join("") : `<div class="empty" style="margin:12px 4px">${emptyLine(4)}</div>`}
+        <div class="todo-new" id="td-new"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg> New to-do</div>
+      </div>
+    </div>
+    ${done.length ? `
+      <h2 style="font-size:15px;margin:20px 0 9px;color:var(--ink-faint)">Done</h2>
+      <div class="card panel"><div class="todo-table">${done.map(todoRowHtml).join("")}</div></div>` : ""}`;
+  wireWeekSeg();
+  $("#td-add").onclick = () => taskEditor(null);
+  $("#td-new").onclick = () => taskEditor(null);
+  $$("#view-week [data-tck]").forEach(ck => ck.onclick = e => { e.stopPropagation(); toggleTaskDone(ck.dataset.tck); });
+  $$("#view-week [data-stop]").forEach(a => a.onclick = e => e.stopPropagation());
+  $$("#view-week [data-tid]").forEach(r => r.onclick = () => {
+    const t = S.tasks.find(x => x.id === r.dataset.tid);
+    if (t) taskEditor(t);
+  });
+}
+function renderBoard() {
   const start = addDays(startOfWeek(todayStr()), UI.boardOffset * 7);
   const span = S.settings.weeksShown || 1;
   const days = [];
@@ -699,8 +811,9 @@ function renderWeek() {
   const rangeLabel = niceDate(start) + " – " + niceDate(last);
   $("#view-week").innerHTML = `
     <div class="viewhead">
-      <div><h1>Week</h1><div class="sub">${rangeLabel}. Drag things where they belong.</div></div>
+      <div><h1>To-dos</h1><div class="sub">${rangeLabel}. Drag things where they belong.</div></div>
       <div class="weekswitch">
+        ${weekModeSeg()}
         <button class="btn small" id="wk-prev" aria-label="previous">‹</button>
         <button class="btn small ghost" id="wk-today">Today</button>
         <button class="btn small" id="wk-next" aria-label="next">›</button>
@@ -721,6 +834,7 @@ function renderWeek() {
   $("#wk-next").onclick = () => { UI.boardOffset += 1; renderWeek(); };
   $("#wk-today").onclick = () => { UI.boardOffset = 0; renderWeek(); };
   $("#wk-span").onchange = e => { S.settings.weeksShown = +e.target.value; save(); renderWeek(); };
+  wireWeekSeg();
   $$("#board .addtask").forEach(btn => btn.onclick = () => inlineAddTask(btn));
   attachBoardEvents($("#board"));
 }
@@ -764,29 +878,47 @@ function wireColorPick(id, onPick) {
   });
 }
 function taskEditor(t) {
-  let picked = t.color || "";
+  const isNew = !t;
+  const base = t || { title: "", day: todayStr(), color: "", tags: [], notes: "", url: "" };
+  let picked = base.color || "";
+  const allTags = Object.keys(S.tags);
   openModal(`
-    <h2>Edit task</h2>
-    <div class="field"><label>Task</label><input id="te-title" value="${esc(t.title)}"></div>
-    <div class="field"><label>Day</label><input id="te-day" type="date" value="${t.day === "someday" ? "" : esc(t.day)}"><span class="hint">Leave empty to park it in Someday.</span></div>
-    <div class="field"><label>Color</label>${colorPickRow("te-colors", picked)}</div>
+    <h2>${isNew ? "New to-do" : "Edit to-do"}</h2>
+    <div class="field"><label>To-do</label><input id="te-title" value="${esc(base.title)}" placeholder="e.g. Email advisor about overrides"></div>
+    <div class="fieldrow">
+      <div class="field"><label>Due / day</label><input id="te-day" type="date" value="${base.day === "someday" ? "" : esc(base.day)}"><span class="hint">Empty = Someday.</span></div>
+      <div class="field"><label>Tags</label><input id="te-tags" value="${esc((base.tags || []).join(", "))}" placeholder="research, admin" list="te-taglist" autocomplete="off"><datalist id="te-taglist">${allTags.map(n => `<option value="${esc(n)}">`).join("")}</datalist><span class="hint">Comma-separated. New names become new tags.</span></div>
+    </div>
+    <div class="field"><label>Description</label><textarea id="te-notes" placeholder="optional details…">${esc(base.notes || "")}</textarea></div>
+    <div class="field"><label>Link</label><input id="te-url" value="${esc(base.url || "")}" placeholder="https://… (optional)" inputmode="url" autocomplete="off"></div>
+    <div class="field"><label>Color (week board)</label>${colorPickRow("te-colors", picked)}</div>
     <div class="modal-actions">
-      <button class="btn ghost danger" id="te-del">Delete</button>
+      ${isNew ? "" : `<button class="btn ghost danger" id="te-del">Delete</button>`}
       <span class="spacer"></span>
       <button class="btn ghost" id="te-cancel">Cancel</button>
-      <button class="btn primary" id="te-save">Save</button>
+      <button class="btn primary" id="te-save">${isNew ? "Add to-do" : "Save"}</button>
     </div>`);
   wireColorPick("te-colors", c => picked = c);
   $("#te-cancel").onclick = closeModal;
-  $("#te-del").onclick = () => { t.deleted = true; t.updatedAt = Date.now(); save(); closeModal(); render(); toast("Deleted"); };
+  if (!isNew) $("#te-del").onclick = () => { t.deleted = true; t.updatedAt = Date.now(); save(); closeModal(); render(); toast("Deleted"); };
   $("#te-save").onclick = () => {
     const title = $("#te-title").value.trim();
     if (!title) { toast("It needs words"); return; }
-    t.title = title;
-    t.day = $("#te-day").value || "someday";
-    t.color = picked;
-    t.updatedAt = Date.now();
-    save(); closeModal(); render(); toast("Saved");
+    let url = $("#te-url").value.trim();
+    if (url && !/^https?:\/\//i.test(url)) url = "https://" + url;
+    const data = {
+      title, day: $("#te-day").value || "someday", color: picked,
+      tags: parseTags($("#te-tags").value), notes: $("#te-notes").value.trim(), url,
+    };
+    data.tags.forEach(tagColor); /* register colors for new tags */
+    if (isNew) {
+      const peers = alive(S.tasks).filter(x => x.day === data.day);
+      const order = peers.length ? Math.max(...peers.map(x => x.order)) + 1 : 1;
+      S.tasks.push({ id: uid(), done: false, order, deleted: false, ...data, updatedAt: Date.now() });
+    } else {
+      Object.assign(t, data, { updatedAt: Date.now() });
+    }
+    save(); closeModal(); render(); toast(isNew ? "To-do added" : "Saved");
   };
   $("#te-title").focus();
 }
@@ -833,6 +965,11 @@ function attachBoardEvents(boardEl) {
   boardEl.addEventListener("pointermove", e => {
     if (!drag || e.pointerId !== drag.pid) return;
     if (!drag.moved && Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY) > 8) {
+      /* on touch, a mostly-vertical gesture is a scroll — let the browser have it */
+      if (e.pointerType !== "mouse" && Math.abs(e.clientY - drag.startY) > Math.abs(e.clientX - drag.startX) * 1.4) {
+        drag = null;
+        return;
+      }
       drag.moved = true;
       const g = drag.card.cloneNode(true);
       g.classList.add("ghostfly");
@@ -903,19 +1040,68 @@ function attachBoardEvents(boardEl) {
 }
 
 /* ============================================================
-   ROUTINE
+   DAILY (routines, classes, schedule)
    ============================================================ */
+function dailyItems(dow) {
+  const rs = alive(S.routines).filter(r => r.days.includes(dow));
+  return {
+    anytime: rs.filter(r => !r.time).sort((a, b) => a.order - b.order),
+    timed: rs.filter(r => r.time).sort((a, b) => a.time.localeCompare(b.time) || a.order - b.order),
+  };
+}
+function timeRange(r) {
+  return r.time ? fmtTime12(r.time) + (r.endTime ? "–" + fmtTime12(r.endTime) : "") : "";
+}
+function schedItemHtml(r, checked, ckAttr) {
+  if (r.kind === "class") {
+    return `<div class="classblock ${checked ? "done" : ""}" data-sched="${r.id}" style="background:${esc(r.color || "var(--accent)")}">
+      <span class="ck ${checked ? "on" : ""}" ${ckAttr}="${r.id}"><svg viewBox="0 0 24 24"><path d="M4 12.5 10 18.5 20 6"/></svg></span>
+      <span class="cbt">${esc(r.title)}</span>
+      ${r.time ? `<span class="range">${timeRange(r)}</span>` : ""}
+    </div>`;
+  }
+  return `<div class="routline ${checked ? "done" : ""}" data-sched="${r.id}"${(r.color && !checked) ? ` style="background:color-mix(in srgb, ${esc(r.color)} 15%, transparent)"` : ""}>
+    <span class="ck ${checked ? "on" : ""}" ${ckAttr}="${r.id}"><svg viewBox="0 0 24 24"><path d="M4 12.5 10 18.5 20 6"/></svg></span>
+    <span class="rt">${esc(r.title)}</span>
+    ${r.time ? `<span class="rtime">${timeRange(r)}</span>` : ""}
+  </div>`;
+}
+function schedHtml(date, ckAttr, includeAnytime = true) {
+  const dow = parseDate(date).getDay();
+  const checks = S.routineChecks[date] || {};
+  const { anytime, timed } = dailyItems(dow);
+  if (!anytime.length && !timed.length) return "";
+  let html = "";
+  if (includeAnytime && anytime.length) {
+    html += `<div class="sched-row"><span class="hr"></span><div class="si"><div class="sched-anytime">Anytime</div>${anytime.map(r => schedItemHtml(r, !!checks[r.id], ckAttr)).join("")}</div></div>`;
+  }
+  let lastHour = -1;
+  for (const r of timed) {
+    const h = +r.time.split(":")[0];
+    const showHr = h !== lastHour;
+    lastHour = h;
+    html += `<div class="sched-row"><span class="hr">${showHr ? fmtTime12(String(h).padStart(2, "0") + ":00") : ""}</span><div class="si">${schedItemHtml(r, !!checks[r.id], ckAttr)}</div></div>`;
+  }
+  return `<div class="sched">${html}</div>`;
+}
+function toggleRoutCheck(date, id) {
+  S.routineChecks[date] = S.routineChecks[date] || {};
+  if (S.routineChecks[date][id]) delete S.routineChecks[date][id];
+  else S.routineChecks[date][id] = true;
+  S.routineCheckMeta[date] = Date.now();
+  save();
+}
 function renderRoutine() {
   const date = UI.routineDate;
   const dow = parseDate(date).getDay();
   const checks = S.routineChecks[date] || {};
-  const routs = alive(S.routines).filter(r => r.days.includes(dow)).sort((a, b) => a.order - b.order);
+  const { anytime, timed } = dailyItems(dow);
   const asg = dueAssignments().filter(a => a.due === date);
   const dayTasks = alive(S.tasks).filter(t => t.day === date).sort((a, b) => a.order - b.order);
   const isToday = date === todayStr();
   $("#view-routine").innerHTML = `
     <div class="viewhead">
-      <div><h1>Routine</h1><div class="sub">The shape of your day. Rearrange as life happens.</div></div>
+      <div><h1>Daily</h1><div class="sub">The shape of your day. Rearrange as life happens.</div></div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <div class="daynav">
           <button class="btn small" id="rt-prev" aria-label="previous day">‹</button>
@@ -926,16 +1112,21 @@ function renderRoutine() {
         <button class="btn primary small" id="rt-add">+ Routine</button>
       </div>
     </div>
-    <div class="routlist" id="rout-sortable">
-      ${routs.length ? routs.map(r => `
-        <div class="routitem ${checks[r.id] ? "done" : ""}" data-rid="${r.id}"${(r.color && !checks[r.id]) ? ` style="background:color-mix(in srgb, ${esc(r.color)} 16%, var(--card));border-color:color-mix(in srgb, ${esc(r.color)} 42%, var(--line));border-left:4px solid ${esc(r.color)}"` : (r.color ? ` style="border-left:4px solid ${esc(r.color)}"` : "")}>
-          <span class="grab" aria-label="drag to reorder"><svg width="14" height="18" viewBox="0 0 14 18" fill="currentColor"><circle cx="4" cy="4" r="1.6"/><circle cx="10" cy="4" r="1.6"/><circle cx="4" cy="9" r="1.6"/><circle cx="10" cy="9" r="1.6"/><circle cx="4" cy="14" r="1.6"/><circle cx="10" cy="14" r="1.6"/></svg></span>
-          <span class="ck ${checks[r.id] ? "on" : ""}" data-rck="${r.id}"><svg viewBox="0 0 24 24"><path d="M4 12.5 10 18.5 20 6"/></svg></span>
-          <div class="body"><div class="t">${esc(r.title)}</div>${r.time ? `<div class="meta">${fmtTime12(r.time)}</div>` : ""}</div>
-          <button class="iconbtn" data-redit="${r.id}" aria-label="edit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg></button>
-        </div>`).join("")
-      : `<div class="empty">No routine for ${DOW_FULL[dow]}s yet. Build one — your future self loves structure.</div>`}
-    </div>
+    ${(!anytime.length && !timed.length) ? `<div class="empty">Nothing planned for ${DOW_FULL[dow]}s yet. Add routines and classes — your future self loves structure.</div>` : ""}
+    ${anytime.length ? `
+      <div class="sched-anytime" style="margin-bottom:6px">Anytime</div>
+      <div class="routlist" id="rout-sortable" style="margin-bottom:18px">
+        ${anytime.map(r => `
+          <div class="routitem ${checks[r.id] ? "done" : ""}" data-rid="${r.id}"${(r.color && !checks[r.id]) ? ` style="background:color-mix(in srgb, ${esc(r.color)} 16%, var(--card));border-color:color-mix(in srgb, ${esc(r.color)} 42%, var(--line))"` : ""}>
+            <span class="grab" aria-label="drag to reorder"><svg width="14" height="18" viewBox="0 0 14 18" fill="currentColor"><circle cx="4" cy="4" r="1.6"/><circle cx="10" cy="4" r="1.6"/><circle cx="4" cy="9" r="1.6"/><circle cx="10" cy="9" r="1.6"/><circle cx="4" cy="14" r="1.6"/><circle cx="10" cy="14" r="1.6"/></svg></span>
+            <span class="ck ${checks[r.id] ? "on" : ""}" data-rck="${r.id}"><svg viewBox="0 0 24 24"><path d="M4 12.5 10 18.5 20 6"/></svg></span>
+            <div class="body"><div class="t">${esc(r.title)}</div></div>
+            <button class="iconbtn" data-redit="${r.id}" aria-label="edit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg></button>
+          </div>`).join("")}
+      </div>` : ""}
+    ${timed.length ? `
+      <div class="sched-anytime" style="margin-bottom:2px">Schedule</div>
+      <div class="card panel" style="max-width:620px">${schedHtml(date, "data-rck", false)}</div>` : ""}
     ${(asg.length || dayTasks.length) ? `
       <h2 style="font-size:16px;margin:22px 0 10px;color:var(--ink-soft)">Also on this day</h2>
       <div class="routlist">
@@ -954,17 +1145,19 @@ function renderRoutine() {
   $("#rt-next").onclick = () => { UI.routineDate = addDays(date, 1); renderRoutine(); };
   if (!isToday) $("#rt-today").onclick = () => { UI.routineDate = todayStr(); renderRoutine(); };
   $("#rt-add").onclick = () => routineEditor(null, dow);
-  $$("#view-routine [data-rck]").forEach(ck => ck.onclick = () => {
-    const id = ck.dataset.rck;
-    S.routineChecks[date] = S.routineChecks[date] || {};
-    if (S.routineChecks[date][id]) delete S.routineChecks[date][id];
-    else S.routineChecks[date][id] = true;
-    S.routineCheckMeta[date] = Date.now();
-    save(); renderRoutine();
+  $$("#view-routine [data-rck]").forEach(ck => ck.onclick = e => {
+    e.stopPropagation();
+    toggleRoutCheck(date, ck.dataset.rck);
+    renderRoutine();
   });
   $$("#view-routine [data-redit]").forEach(b => b.onclick = e => {
     e.stopPropagation();
     const r = S.routines.find(x => x.id === b.dataset.redit);
+    if (r) routineEditor(r, dow);
+  });
+  $$("#view-routine [data-sched]").forEach(row => row.onclick = e => {
+    if (e.target.closest(".ck")) return;
+    const r = S.routines.find(x => x.id === row.dataset.sched);
     if (r) routineEditor(r, dow);
   });
   $$("#view-routine [data-ack]").forEach(ck => ck.onclick = e => {
@@ -1023,13 +1216,21 @@ function attachRoutineDrag(listEl) {
 }
 function routineEditor(r, defaultDow) {
   const isNew = !r;
-  r = r || { title: "", time: "", days: [0, 1, 2, 3, 4, 5, 6], color: "" };
+  r = r || { title: "", time: "", endTime: "", kind: "routine", days: [0, 1, 2, 3, 4, 5, 6], color: "" };
   let days = [...r.days];
   let picked = r.color || "";
+  let kind = r.kind === "class" ? "class" : "routine";
   openModal(`
     <h2>${isNew ? "New routine" : "Edit routine"}</h2>
-    <div class="field"><label>What is it?</label><input id="re-title" value="${esc(r.title)}" placeholder="e.g. Gym, Review notes, Call home"></div>
-    <div class="field"><label>Time <span style="text-transform:none;font-weight:400">(optional)</span></label><input id="re-time" type="time" value="${esc(r.time || "")}"></div>
+    <div class="field"><label>Type</label><div class="seg" id="re-kind">
+      <button data-k="routine" class="${kind === "routine" ? "active" : ""}">Routine</button>
+      <button data-k="class" class="${kind === "class" ? "active" : ""}">Class</button>
+    </div><span class="hint">Classes show as solid colored blocks in the schedule.</span></div>
+    <div class="field"><label>What is it?</label><input id="re-title" value="${esc(r.title)}" placeholder="e.g. Gym, PSY 101 lecture, Call home"></div>
+    <div class="fieldrow">
+      <div class="field"><label>Starts <span style="text-transform:none;font-weight:400">(optional)</span></label><input id="re-time" type="time" value="${esc(r.time || "")}"></div>
+      <div class="field"><label>Ends <span style="text-transform:none;font-weight:400">(optional)</span></label><input id="re-end" type="time" value="${esc(r.endTime || "")}"></div>
+    </div>
     <div class="field"><label>Which days?</label><div class="daypicker" id="re-days">
       ${[1, 2, 3, 4, 5, 6, 0].map(d => `<button data-d="${d}" class="${days.includes(d) ? "on" : ""}">${DOW[d]}</button>`).join("")}
     </div></div>
@@ -1046,6 +1247,10 @@ function routineEditor(r, defaultDow) {
     else days.push(d);
     b.classList.toggle("on", days.includes(d));
   });
+  $$("#re-kind button").forEach(b => b.onclick = () => {
+    kind = b.dataset.k;
+    $$("#re-kind button").forEach(x => x.classList.toggle("active", x === b));
+  });
   wireColorPick("re-colors", c => picked = c);
   $("#re-cancel").onclick = closeModal;
   if (!isNew) $("#re-del").onclick = () => confirmBox("Delete routine?", `"${r.title}" disappears from every day.`, "Delete", () => {
@@ -1055,11 +1260,13 @@ function routineEditor(r, defaultDow) {
     const title = $("#re-title").value.trim();
     if (!title) { toast("Name the routine first"); return; }
     if (!days.length) { toast("Pick at least one day"); return; }
+    const time = $("#re-time").value;
+    const endTime = time ? $("#re-end").value : "";
     if (isNew) {
       const order = S.routines.length ? Math.max(...S.routines.map(x => x.order)) + 1 : 0;
-      S.routines.push({ id: uid(), title, time: $("#re-time").value, days, color: picked, order, deleted: false, updatedAt: Date.now() });
+      S.routines.push({ id: uid(), title, kind, time, endTime, days, color: picked, order, deleted: false, updatedAt: Date.now() });
     } else {
-      Object.assign(r, { title, time: $("#re-time").value, days, color: picked, updatedAt: Date.now() });
+      Object.assign(r, { title, kind, time, endTime, days, color: picked, updatedAt: Date.now() });
     }
     save(); closeModal(); render(); toast(isNew ? "Routine added" : "Saved");
   };
@@ -1077,7 +1284,8 @@ function renderCalendar() {
       <div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap">
         <div class="seg" id="cal-seg">
           <button data-cm="month" class="${UI.calMode === "month" ? "active" : ""}">Month</button>
-          <button data-cm="list" class="${UI.calMode === "list" ? "active" : ""}">All assignments</button>
+          <button data-cm="table" class="${UI.calMode === "table" ? "active" : ""}">Table</button>
+          <button data-cm="list" class="${UI.calMode === "list" ? "active" : ""}">All</button>
         </div>
         <button class="btn primary small" id="cal-add">+ Assignment</button>
       </div>
@@ -1085,7 +1293,54 @@ function renderCalendar() {
     <div id="cal-body"></div>`;
   $("#cal-add").onclick = () => assignmentEditor(null);
   $$("#cal-seg button").forEach(b => b.onclick = () => { UI.calMode = b.dataset.cm; renderCalendar(); });
-  if (UI.calMode === "month") renderCalMonth(); else renderCalList();
+  if (UI.calMode === "month") renderCalMonth();
+  else if (UI.calMode === "table") renderCalTable();
+  else renderCalList();
+}
+function renderCalTable() {
+  const [y, m] = UI.calMonth;
+  const first = fmtDate(new Date(y, m, 1));
+  const last = fmtDate(new Date(y, m + 1, 0));
+  const list = dueAssignments().filter(a => a.due >= first && a.due <= last);
+  $("#cal-body").innerHTML = `
+    <div class="calhead">
+      <h2>${MONTHS[m]} ${y}</h2>
+      <div style="display:flex;gap:6px">
+        <button class="btn small" id="cm-prev">‹</button>
+        <button class="btn small ghost" id="cm-now">Today</button>
+        <button class="btn small" id="cm-next">›</button>
+      </div>
+    </div>
+    <div class="card panel"><div class="todo-table">
+      <div class="todo-head"><span></span><span>Assignment</span><span style="text-align:right">Course · type</span><span style="text-align:right">Due</span><span style="text-align:right">Days left</span></div>
+      ${list.length ? list.map(a => {
+        const done = a.status === "Done";
+        const dl = done ? null : daysLeftLabel(a.due);
+        return `<div class="todo-row ${done ? "done" : ""}" data-asg="${a.id}">
+          <span class="ck ${done ? "on" : ""}" data-ack="${a.id}" style="width:19px;height:19px"><svg viewBox="0 0 24 24"><path d="M4 12.5 10 18.5 20 6"/></svg></span>
+          <span class="tt">${esc(a.title)}</span>
+          <span class="tags">${a.courseId ? `<span class="chip c-faint">${esc(courseLabel(a.courseId))}</span>` : ""}<span class="chip ${typeChipClass(a.type)}">${typeGlyph(a.type, 9)}${esc(a.type)}</span></span>
+          <span class="due-d">${niceDate(a.due)}${a.time ? " " + fmtTime12(a.time) : ""}</span>
+          <span class="left-d ${dl ? dl.cls : ""}">${dl ? dl.txt : "done"}</span>
+        </div>`;
+      }).join("") : `<div class="empty" style="margin:12px 4px">Nothing due in ${MONTHS[m]}. Either heaven, or you forgot to add things.</div>`}
+    </div></div>`;
+  $("#cm-prev").onclick = () => { UI.calMonth = m === 0 ? [y - 1, 11] : [y, m - 1]; renderCalendar(); };
+  $("#cm-next").onclick = () => { UI.calMonth = m === 11 ? [y + 1, 0] : [y, m + 1]; renderCalendar(); };
+  $("#cm-now").onclick = () => { const d = new Date(); UI.calMonth = [d.getFullYear(), d.getMonth()]; renderCalendar(); };
+  $$("#cal-body [data-asg]").forEach(r => r.onclick = () => {
+    const a = S.assignments.find(x => x.id === r.dataset.asg);
+    if (a) assignmentDetail(a);
+  });
+  $$("#cal-body [data-ack]").forEach(ck => ck.onclick = e => {
+    e.stopPropagation();
+    const a = S.assignments.find(x => x.id === ck.dataset.ack);
+    if (!a) return;
+    if (a.status === "Done") { a.status = "In progress"; a.updatedAt = Date.now(); save(); gcalQueuePush(); renderCalendar(); }
+    else confirmBox("Finish this one?", `Mark "${a.title}" as done — are you sure?`, "Yes, done", () => {
+      a.status = "Done"; a.updatedAt = Date.now(); save(); gcalQueuePush(); renderCalendar(); toast("Nice work.");
+    });
+  });
 }
 function renderCalMonth() {
   const [y, m] = UI.calMonth;
@@ -1455,7 +1710,7 @@ async function supaFetch(method, query, body) {
 function sharedState() {
   return {
     courses: S.courses, assignments: S.assignments, tasks: S.tasks,
-    routines: S.routines, links: S.links,
+    routines: S.routines, links: S.links, tags: S.tags,
     routineChecks: S.routineChecks, routineCheckMeta: S.routineCheckMeta,
   };
 }
@@ -1478,6 +1733,9 @@ function mergeRemote(remote) {
       S.routineCheckMeta[date] = rMeta[date];
       changed = true;
     }
+  }
+  for (const name in (remote.tags || {})) {
+    if (!S.tags[name]) { S.tags[name] = remote.tags[name]; changed = true; }
   }
   return changed;
 }
@@ -1534,6 +1792,17 @@ function renderSettings() {
     </div>
 
     <div class="card set-section">
+      <h2>Personal touch</h2>
+      <div class="desc">A banner image for your dashboard — a photo, art, anything that feels like yours. Stays on this device.</div>
+      ${s.banner ? `<img src="${s.banner}" alt="" style="width:100%;max-width:380px;height:90px;object-fit:cover;border-radius:10px;margin-bottom:11px;display:block">` : ""}
+      <div style="display:flex;gap:9px;flex-wrap:wrap">
+        <button class="btn" id="st-banner">${s.banner ? "Change banner" : "Add banner image"}</button>
+        ${s.banner ? `<button class="btn ghost danger" id="st-banner-rm">Remove</button>` : ""}
+        <input type="file" id="st-banner-file" accept="image/*" style="display:none">
+      </div>
+    </div>
+
+    <div class="card set-section">
       <h2>Planner</h2>
       <div class="set-inline"><span>Show upcoming tests within</span>
         <select id="st-ahead" style="border:1.5px solid var(--line-strong);background:var(--card);color:var(--ink);border-radius:9px;padding:6px 10px;font-weight:700">
@@ -1584,6 +1853,30 @@ function renderSettings() {
   $$("#st-look button").forEach(b => b.onclick = () => {
     s.look = b.dataset.l; persist(); applyTheme(); renderSettings();
   });
+  $("#st-banner").onclick = () => $("#st-banner-file").click();
+  if (s.banner) $("#st-banner-rm").onclick = () => { s.banner = ""; persist(); renderSettings(); toast("Banner removed"); };
+  $("#st-banner-file").onchange = e => {
+    const f = e.target.files[0];
+    if (!f) return;
+    const img = new Image();
+    const reader = new FileReader();
+    reader.onload = () => {
+      img.onload = () => {
+        const w = Math.min(1400, img.width);
+        const h = Math.round(img.height * (w / img.width));
+        const cv = document.createElement("canvas");
+        cv.width = w; cv.height = h;
+        cv.getContext("2d").drawImage(img, 0, 0, w, h);
+        try {
+          s.banner = cv.toDataURL("image/jpeg", 0.82);
+          persist(); renderSettings(); toast("Banner set");
+        } catch (err) { toast("Couldn't read that image"); }
+      };
+      img.onerror = () => toast("Couldn't read that image");
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(f);
+  };
   $("#st-ahead").onchange = e => { s.testLookahead = +e.target.value; save(); };
   $("#st-gconnect").onclick = () => {
     const v = $("#st-gcid").value.trim();

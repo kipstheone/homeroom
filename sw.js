@@ -1,5 +1,5 @@
 /* Homeroom service worker — cache-first for the app shell, network for APIs */
-const CACHE = "homeroom-v3";
+const CACHE = "homeroom-v4";
 const SHELL = ["./", "./index.html", "./app.js", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png"];
 
 self.addEventListener("install", e => {
