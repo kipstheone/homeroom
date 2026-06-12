@@ -2,7 +2,7 @@
 /* ============================================================
    ODO — app logic
    ============================================================ */
-const APP_VERSION = "v7";
+const APP_VERSION = "v9";
 
 /* ---------- tiny helpers ---------- */
 const $ = s => document.querySelector(s);
@@ -91,7 +91,7 @@ const DEFAULTS = {
   settings: {
     theme: "auto", palette: "hearth", look: "paper", dashLayout: null, banner: "", userName: "",
     testLookahead: 14, weeksShown: 1,
-    gcalClientId: "", gcalCalendarId: "",
+    gcalClientId: "", gcalCalendarId: "", gcalHint: "",
     supaUrl: "", supaKey: "", syncId: "",
   },
 };
@@ -1574,10 +1574,14 @@ let gToken = null, gTokenExp = 0, tokenClient = null, gcalBusy = false, gcalTime
 const gcalLinked = () => localStorage.getItem("hr_gcal") === "1";
 const gcalReady = () => !!(S.settings.gcalClientId && window.google?.accounts?.oauth2);
 
-function requestToken(interactive) {
+const tokenValid = () => gToken && Date.now() < gTokenExp - 60000;
+/* level: "passive" = never show any Google UI (background syncs)
+          "silent"  = reuse session, hint the account, minimal/no UI (after user edits)
+          "consent" = full sign-in (user clicked Connect/Sync) */
+function requestToken(level) {
   return new Promise(res => {
-    if (gToken && Date.now() < gTokenExp - 60000) return res(gToken);
-    if (!gcalReady()) return res(null);
+    if (tokenValid()) return res(gToken);
+    if (level === "passive" || !gcalReady()) return res(null);
     if (!tokenClient) {
       tokenClient = google.accounts.oauth2.initTokenClient({
         client_id: S.settings.gcalClientId,
@@ -1596,13 +1600,23 @@ function requestToken(interactive) {
       } else done(null);
     };
     tokenClient.error_callback = () => done(null);
-    setTimeout(() => done(gToken && Date.now() < gTokenExp ? gToken : null), 90000);
-    try { tokenClient.requestAccessToken({ prompt: interactive ? "consent" : "" }); }
+    setTimeout(() => done(tokenValid() ? gToken : null), 90000);
+    const opts = { prompt: level === "consent" ? "consent" : "" };
+    if (S.settings.gcalHint) opts.login_hint = S.settings.gcalHint; /* skips the account chooser */
+    try { tokenClient.requestAccessToken(opts); }
     catch (e) { done(null); }
   });
 }
+async function ensureHint() {
+  if (S.settings.gcalHint) return;
+  try {
+    const list = await gfetch("/users/me/calendarList?maxResults=250");
+    const p = (list?.items || []).find(c => c.primary);
+    if (p && p.id) { S.settings.gcalHint = p.id; persist(); }
+  } catch (e) { }
+}
 async function gfetch(path, opts = {}) {
-  const t = await requestToken(false);
+  const t = await requestToken("passive");
   if (!t) throw new Error("no-token");
   const r = await fetch("https://www.googleapis.com/calendar/v3" + path, {
     ...opts,
@@ -1729,21 +1743,27 @@ async function gcalPush(calId) {
     a.gsyncedAt = Date.now() + 5000; /* small buffer so our own write isn't echoed back over local */
   }
 }
-async function gcalSync(interactive = false) {
+/* mode: false = passive background sync (NEVER shows Google UI)
+         "silent" = after a local edit (reuses session, hinted account)
+         true = user explicitly clicked Connect / Sync now */
+async function gcalSync(mode = false) {
+  const interactive = mode === true;
   if (!S.settings.gcalClientId) { if (interactive) toast("Add your Google Client ID in Settings first"); return; }
   if (!window.google?.accounts?.oauth2) { if (interactive) toast("Google library still loading — try again in a moment"); return; }
   if (gcalBusy) return;
   gcalBusy = true;
   try {
     setPill("syncing Google…");
-    const tok = await requestToken(interactive);
+    let tok = await requestToken(mode === false ? "passive" : "silent");
+    if (!tok && interactive) tok = await requestToken("consent");
     if (!tok) {
-      setPill(gcalLinked() ? "Google: tap Sync to reconnect" : "Google not connected", false, false);
+      setPill(gcalLinked() ? "Google: tap Sync in Settings to refresh" : "Google not connected", false, false);
       gcalBusy = false;
       if (interactive) toast("Couldn't connect to Google");
-      if (UI.view === "settings") renderSettings();
+      if (UI.view === "settings" && interactive) renderSettings();
       return;
     }
+    await ensureHint();
     const calId = await ensureCalendar();
     await gcalPull(calId);
     await gcalPush(calId);
@@ -1762,11 +1782,13 @@ async function gcalSync(interactive = false) {
 function gcalQueuePush() {
   if (!gcalLinked() || !S.settings.gcalClientId) return;
   clearTimeout(gcalTimer);
-  gcalTimer = setTimeout(() => gcalSync(false), 2500);
+  gcalTimer = setTimeout(() => gcalSync("silent"), 2500);
 }
 function gcalDisconnect() {
   try { if (gToken) google.accounts.oauth2.revoke(gToken, () => { }); } catch (e) { }
   gToken = null; gTokenExp = 0;
+  S.settings.gcalHint = "";
+  persist();
   localStorage.removeItem("hr_gcal");
   setPill("Google disconnected");
 }
@@ -1908,11 +1930,35 @@ function supaHelp() {
   $("#sh-copysql").onclick = () => copyText(SUPA_SQL, "SQL");
   $("#sh-done").onclick = closeModal;
 }
+function hostHelp() {
+  openModal(`
+    <h2>Hosting, installing & updating</h2>
+    <p class="hint" style="margin:-8px 0 14px">How this app lives on the internet and on your phone.</p>
+    ${helpStep(1, `The app is plain files hosted free on GitHub Pages at:
+      ${helpCode("https://kipstheone.github.io/homeroom/")}
+      Nothing needs to stay running — GitHub serves it forever.`)}
+    ${helpStep(2, `<b>Install on iPhone:</b> open that URL in Safari → Share button → <b>Add to Home Screen</b>. It becomes a full-screen app with its own icon and works offline.`)}
+    ${helpStep(3, `<b>Updating the app:</b> upload replacement files to the GitHub repo (repo → Add file → Upload files → drag in → Commit). Wait ~2 minutes, then fully close and reopen the app twice. Check the version number at the bottom of Settings to confirm.`)}
+    ${helpStep(4, `<b>Your data is never in those files.</b> It lives in your browser plus Google Calendar and Supabase if connected — updates can't erase it. Still, Settings → Export backup before big changes is cheap insurance.`)}
+    ${helpStep(5, `<b>Sharing with friends:</b> just give them the URL. Their data is their own (each browser keeps its own). For Google sync they need their Gmail added as a test user in your Google Cloud console — or they skip that feature. For device sync they should use their own sync code.`)}
+    <div class="modal-actions"><button class="btn primary" id="hh-done">Got it</button></div>`);
+  $("#hh-done").onclick = closeModal;
+}
 function renderSettings() {
   const s = S.settings;
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
   $("#view-settings").innerHTML = `
     <div class="viewhead"><div><h1>Settings</h1><div class="sub">The boring tab that makes everything else work.</div></div></div>
+
+    <div class="card set-section">
+      <h2>Guides</h2>
+      <div class="desc">Step-by-step walkthroughs for the one-time setup. Each takes 10–15 minutes and you only ever do it once.</div>
+      <div style="display:flex;gap:9px;flex-wrap:wrap">
+        <button class="btn" id="st-guide-g">Google Calendar guide</button>
+        <button class="btn" id="st-guide-s">Device sync guide</button>
+        <button class="btn" id="st-guide-h">Hosting & updating</button>
+      </div>
+    </div>
 
     <div class="card set-section">
       <h2>Appearance</h2>
@@ -2034,9 +2080,12 @@ function renderSettings() {
   $("#st-sid").oninput = e => { s.syncId = e.target.value.trim(); persist(); };
   $("#st-ghelp").onclick = gcalHelp;
   $("#st-shelp").onclick = supaHelp;
+  $("#st-guide-g").onclick = gcalHelp;
+  $("#st-guide-s").onclick = supaHelp;
+  $("#st-guide-h").onclick = hostHelp;
   $("#st-gconnect").onclick = () => {
     if (!s.gcalClientId) { toast("Paste your Client ID first"); return; }
-    gcalSync(!gcalLinked());
+    gcalSync(true); /* tries quietly first, only shows Google UI if it must */
   };
   if (gcalLinked()) $("#st-gdisc").onclick = () => { gcalDisconnect(); renderSettings(); toast("Google disconnected"); };
   $("#st-ssave").onclick = () => {
