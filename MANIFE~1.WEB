@@ -1,7 +1,7 @@
 {
-  "name": "Homeroom",
-  "short_name": "Homeroom",
-  "description": "A cozy schedule for college life.",
+  "name": "ODO",
+  "short_name": "ODO",
+  "description": "ODO — One Day, or Day One. A cozy schedule for college life.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

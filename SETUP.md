@@ -1,6 +1,10 @@
-# Homeroom — Setup Guide
+# ODO — Setup Guide
 
-Homeroom is a small web app you host for free. One-time setup is three parts:
+*ODO: One Day, or Day One.*
+
+**Updating the app later:** your data is never stored in these files — it lives in your browser (plus Google Calendar and Supabase if connected). Replacing the files on GitHub with a new version keeps all your data. Still, hit Settings → Export backup before big updates, because backups are free.
+
+ODO is a small web app you host for free. One-time setup is three parts:
 **A.** put it online (5 min) · **B.** connect Google Calendar (15 min) · **C.** enable device sync (10 min).
 Parts B and C are optional — the app works fully on one device without them.
 
@@ -29,7 +33,7 @@ On desktop, just bookmark the URL — or in Chrome/Edge, click the install icon 
 
 ## Part B — Google Calendar two-way sync (optional)
 
-This lets assignments flow both ways between Homeroom and Google Calendar. Homeroom creates a dedicated calendar called **"Homeroom"** in your Google account — your normal calendar stays untouched, and Google's reminders/notifications work on everything in it.
+This lets assignments flow both ways between ODO and Google Calendar. ODO creates a dedicated calendar called **"ODO"** in your Google account — your normal calendar stays untouched, and Google's reminders/notifications work on everything in it.
 
 You only do this once, and it's free.
 
@@ -37,7 +41,7 @@ You only do this once, and it's free.
 2. Top bar → project dropdown → **New Project**. Name it `homeroom`, click **Create**, then make sure it's selected.
 3. In the search bar, type **Google Calendar API** → open it → click **Enable**.
 4. Left menu → **APIs & Services → OAuth consent screen** (it may be called "Google Auth Platform"):
-   - Click **Get started** / configure. App name: `Homeroom`. Support email: your email.
+   - Click **Get started** / configure. App name: `ODO`. Support email: your email.
    - Audience: **External**. Contact email: your email. Finish/Create.
    - Under **Audience** (or "Test users"), click **Add users** and add **your own Gmail address**. (While the app is in "Testing" mode only listed users can sign in — that's you, which is all you need. Sign-in will mention the app is unverified; that's expected for personal apps, click "Continue".)
 5. Left menu → **APIs & Services → Credentials** → **Create credentials → OAuth client ID**:
@@ -45,14 +49,14 @@ You only do this once, and it's free.
    - Under **Authorized JavaScript origins**, click **Add URI** and enter your site origin **exactly**, with no trailing slash:
      `https://YOURUSERNAME.github.io`
    - Click **Create**. Copy the **Client ID** (ends in `.apps.googleusercontent.com`).
-6. Open Homeroom → **Settings → Google Calendar** → paste the Client ID → **Connect Google** → choose your account and allow access.
+6. Open ODO → **Settings → Google Calendar** → paste the Client ID → **Connect Google** → choose your account and allow access.
 
 That's it. Notes:
 
 - Google sign-in tokens last about an hour. The app quietly reconnects when it can; if the sidebar says "tap Sync to reconnect", open Settings and hit **Sync now** (one click, no password).
 - On iPhone, Google's sign-in popup occasionally misbehaves inside the home-screen app. If connecting fails there, open the same URL in regular Safari once, connect, then go back to the home-screen app — it shares the connection.
-- Anything you add **to the "Homeroom" calendar** in Google Calendar (or that your school's LMS exports into it) appears in the app, with course and type guessed from the title.
-- To get Google reminders, open Google Calendar → Homeroom calendar settings → set default notifications.
+- Anything you add **to the "ODO" calendar** in Google Calendar (or that your school's LMS exports into it) appears in the app, with course and type guessed from the title.
+- To get Google reminders, open Google Calendar → ODO calendar settings → set default notifications.
 
 ---
 
@@ -78,7 +82,7 @@ create policy "open access" on homeroom_state
 4. Left sidebar → **Project Settings → API** (or "Data API"). Copy two things:
    - **Project URL** (like `https://abcdefgh.supabase.co`)
    - **anon / public key** (long string starting `eyJ…`)
-5. Open Homeroom → **Settings → Device sync** → paste both, and invent a **sync code** — a long passphrase only you know (e.g. `plum-toast-quasar-1947-rugby`). Click **Save & sync now**.
+5. Open ODO → **Settings → Device sync** → paste both, and invent a **sync code** — a long passphrase only you know (e.g. `plum-toast-quasar-1947-rugby`). Click **Save & sync now**.
 6. Repeat step 5 on your other device with the **same three values**. Done — they now stay in step.
 
 Security note: anyone who had your URL, key, *and* sync code could read that row, so make the sync code long and never share it. Your data is course schedules, not state secrets, but still.

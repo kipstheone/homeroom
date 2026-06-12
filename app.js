@@ -81,13 +81,14 @@ const DEFAULTS = {
   routineChecks: {}, // {'YYYY-MM-DD': {routineId:true, ...}}
   routineCheckMeta: {}, // {'YYYY-MM-DD': lastModifiedTs}
   tags: {},          // {tagName: colorHex}
+  tagsMeta: {},      // {tagName: lastModifiedTs}
   __m2: true,        // look-migration flag
   links: [            // {id,title,url,color,updatedAt,deleted}
     { id: "lk-gmail", title: "Gmail", url: "https://mail.google.com", color: "#b6543c", updatedAt: 1, deleted: false },
     { id: "lk-canvas", title: "Canvas", url: "https://canvas.instructure.com", color: "#5f7d54", updatedAt: 1, deleted: false },
   ],
   settings: {
-    theme: "auto", palette: "hearth", look: "paper", dashLayout: null, banner: "",
+    theme: "auto", palette: "hearth", look: "paper", dashLayout: null, banner: "", userName: "",
     testLookahead: 14, weeksShown: 1,
     gcalClientId: "", gcalCalendarId: "",
     supaUrl: "", supaKey: "", syncId: "",
@@ -216,9 +217,42 @@ const typeGlyph = (t, sz = 10) =>
 function tagColor(name) {
   if (!S.tags[name]) {
     S.tags[name] = TAG_COLORS[Object.keys(S.tags).length % TAG_COLORS.length];
+    S.tagsMeta[name] = Date.now();
     persist();
   }
   return S.tags[name];
+}
+function tagManager() {
+  const names = Object.keys(S.tags).sort((a, b) => a.localeCompare(b));
+  openModal(`
+    <h2>Tags</h2>
+    <p class="hint" style="margin:-8px 0 14px">Pick any color to repaint a tag everywhere. The × removes it from every to-do.</p>
+    ${names.length ? names.map((n, i) => `
+      <div class="field">
+        <label style="text-transform:none;letter-spacing:0;display:flex;align-items:center;justify-content:space-between;gap:8px">${tagChip(n)}
+          <button class="iconbtn" data-tagdel="${esc(n)}" aria-label="delete tag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+        </label>
+        ${colorPickRow("tagc-" + i, S.tags[n])}
+      </div>`).join("") : `<div class="empty">No tags yet — type some while adding a to-do.</div>`}
+    <div class="modal-actions"><button class="btn primary" id="tg-done">Done</button></div>`);
+  names.forEach((n, i) => wireColorPick("tagc-" + i, c => {
+    if (!c) return; /* tags always need a color */
+    S.tags[n] = c;
+    S.tagsMeta[n] = Date.now();
+    save();
+    tagManager();
+  }));
+  $$("#modal [data-tagdel]").forEach(b => b.onclick = () => {
+    const name = b.dataset.tagdel;
+    delete S.tags[name];
+    delete S.tagsMeta[name];
+    for (const t of S.tasks) {
+      if (t.tags && t.tags.includes(name)) { t.tags = t.tags.filter(x => x !== name); t.updatedAt = Date.now(); }
+    }
+    save();
+    tagManager();
+  });
+  $("#tg-done").onclick = () => { closeModal(); render(); };
 }
 function tagChip(name) {
   const c = tagColor(name);
@@ -452,7 +486,7 @@ function renderHome() {
         const dl = (t.day !== "someday") ? daysLeftLabel(t.day) : null;
         return `<div class="mini-todo ${t.done ? "done" : ""}">
           <span class="ck ${t.done ? "on" : ""}" data-tck="${t.id}" style="width:18px;height:18px"><svg viewBox="0 0 24 24"><path d="M4 12.5 10 18.5 20 6"/></svg></span>
-          <span class="tt" data-tedit="${t.id}">${esc(t.title)}</span>
+          <span class="tt" data-tedit="${t.id}"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.title)}</span>${(t.tags || []).slice(0, 2).map(tagChip).join("")}</span>
           <span style="font-size:12px;color:var(--ink-soft);font-weight:600;white-space:nowrap">${t.day === "someday" ? "someday" : relDay(t.day)}</span>
           <span class="left-d ${dl ? dl.cls : ""}" style="font-size:11px;font-weight:800;min-width:54px;text-align:right">${dl ? dl.txt : ""}</span>
         </div>`;
@@ -467,7 +501,7 @@ function renderHome() {
     ${S.settings.banner ? `<img class="banner" src="${S.settings.banner}" alt="">` : ""}
     <div class="viewhead">
       <div>
-        <h1>${g.part}, Sean.</h1>
+        <h1>${g.part}${S.settings.userName ? ", " + esc(S.settings.userName) : ""}.</h1>
         <svg class="squiggle" width="150" height="8" viewBox="0 0 150 8"><path d="M2 5 Q 14 1 26 5 T 50 5 T 74 5 T 98 5 T 122 5 T 146 5"/></svg>
         <div class="greeting">${niceDate(today)} — ${g.line}</div>
       </div>
@@ -639,6 +673,12 @@ function courseDetail(c) {
     c.deleted = true; c.updatedAt = Date.now(); save(); render(); toast("Course removed");
   }, true);
 }
+const DAY_LETTERS = ["Su", "M", "Tu", "W", "Th", "F", "Sa"];
+function meetingsLabel(meetings) {
+  return (meetings || []).filter(m => m.days.length && m.start)
+    .map(m => [...m.days].sort((a, b) => ((a + 6) % 7) - ((b + 6) % 7)).map(d => DAY_LETTERS[d]).join("") + " " + fmtTime12(m.start) + (m.end ? "–" + fmtTime12(m.end) : ""))
+    .join(" · ");
+}
 function customRowHtml(k, v) {
   return `<div class="fieldrow customrow">
     <div class="field"><label>Box name</label><input class="cf-k" value="${esc(k)}" placeholder="e.g. TA contact"></div>
@@ -648,8 +688,9 @@ function customRowHtml(k, v) {
 }
 function courseEditor(c) {
   const isNew = !c;
-  c = c || { name: "", code: "", color: COURSE_COLORS[alive(S.courses).length % COURSE_COLORS.length], meetingTimes: "", room: "", instructor: "", email: "", officeHours: "", syllabusUrl: "", grading: "", description: "", textbooks: "", custom: [] };
+  c = c || { name: "", code: "", color: COURSE_COLORS[alive(S.courses).length % COURSE_COLORS.length], meetingTimes: "", meetings: [], room: "", instructor: "", email: "", officeHours: "", syllabusUrl: "", grading: "", description: "", textbooks: "", custom: [] };
   let pickedColor = c.color;
+  let meets = (c.meetings || []).map(m => ({ days: [...(m.days || [])], start: m.start || "", end: m.end || "" }));
   openModal(`
     <h2>${isNew ? "New course" : "Edit course"}</h2>
     <div class="fieldrow">
@@ -659,10 +700,12 @@ function courseEditor(c) {
     <div class="field"><label>Color</label><div class="colorpick" id="ce-colors">
       ${COURSE_COLORS.map(col => `<button data-col="${col}" class="${col === c.color ? "sel" : ""}" style="background:${col}" aria-label="color"></button>`).join("")}
     </div></div>
-    <div class="fieldrow">
-      <div class="field"><label>Meeting times</label><input id="ce-meet" value="${esc(c.meetingTimes)}" placeholder="MWF 10–10:50"></div>
-      <div class="field"><label>Room</label><input id="ce-room" value="${esc(c.room)}" placeholder="Hall 204"></div>
+    <div class="field"><label>Meeting times</label>
+      <div id="ce-meets"></div>
+      <button class="btn small ghost" id="ce-addmeet" type="button">+ Add meeting time</button>
+      <span class="hint">These drop straight into your Daily schedule as class blocks.</span>
     </div>
+    <div class="field"><label>Room</label><input id="ce-room" value="${esc(c.room)}" placeholder="Hall 204"></div>
     <div class="fieldrow">
       <div class="field"><label>Instructor</label><input id="ce-inst" value="${esc(c.instructor)}" placeholder="Dr. …"></div>
       <div class="field"><label>Contact</label><input id="ce-email" value="${esc(c.email)}" placeholder="email / office"></div>
@@ -683,6 +726,26 @@ function courseEditor(c) {
       <button class="btn ghost" id="ce-cancel">Cancel</button>
       <button class="btn primary" id="ce-save">${isNew ? "Add course" : "Save"}</button>
     </div>`);
+  const renderMeets = () => {
+    $("#ce-meets").innerHTML = meets.map((m, i) => `
+      <div class="meetrow">
+        <div class="daypicker mini">${[1, 2, 3, 4, 5, 6, 0].map(d => `<button type="button" data-mi="${i}" data-d="${d}" class="${m.days.includes(d) ? "on" : ""}">${DOW[d][0]}</button>`).join("")}</div>
+        <input type="time" class="mr-t" data-mi="${i}" data-f="start" value="${esc(m.start)}">
+        <span class="hint">–</span>
+        <input type="time" class="mr-t" data-mi="${i}" data-f="end" value="${esc(m.end)}">
+        <button class="iconbtn" type="button" data-mx="${i}" aria-label="remove"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+      </div>`).join("");
+    $$("#ce-meets [data-d]").forEach(b => b.onclick = () => {
+      const m = meets[+b.dataset.mi];
+      const d = +b.dataset.d;
+      m.days = m.days.includes(d) ? m.days.filter(x => x !== d) : [...m.days, d];
+      renderMeets();
+    });
+    $$("#ce-meets .mr-t").forEach(inp => inp.onchange = () => { meets[+inp.dataset.mi][inp.dataset.f] = inp.value; });
+    $$("#ce-meets [data-mx]").forEach(b => b.onclick = () => { meets.splice(+b.dataset.mx, 1); renderMeets(); });
+  };
+  renderMeets();
+  $("#ce-addmeet").onclick = () => { meets.push({ days: [], start: "", end: "" }); renderMeets(); };
   const wireCustomRows = () => $$("#ce-custom .cf-x").forEach(b => b.onclick = () => b.closest(".customrow").remove());
   wireCustomRows();
   $("#ce-addcustom").onclick = () => {
@@ -699,9 +762,10 @@ function courseEditor(c) {
   $("#ce-save").onclick = () => {
     const name = $("#ce-name").value.trim();
     if (!name) { toast("The course needs a name"); return; }
+    const meetings = meets.filter(m => m.days.length && m.start).map(m => ({ days: [...m.days], start: m.start, end: m.end || "" }));
     const data = {
       name, code: $("#ce-code").value.trim(), color: pickedColor,
-      meetingTimes: $("#ce-meet").value.trim(), room: $("#ce-room").value.trim(),
+      meetings, meetingTimes: meetingsLabel(meetings), room: $("#ce-room").value.trim(),
       instructor: $("#ce-inst").value.trim(), email: $("#ce-email").value.trim(),
       officeHours: $("#ce-oh").value.trim(), syllabusUrl: $("#ce-syl").value.trim(),
       grading: $("#ce-grade").value.trim(), textbooks: $("#ce-books").value.trim(),
@@ -778,6 +842,7 @@ function renderTodoList() {
       <div><h1>To-dos</h1><div class="sub">Everything you owe yourself, in one list.</div></div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         ${weekModeSeg()}
+        <button class="btn small" id="td-tags">Tags</button>
         <button class="btn primary" id="td-add">+ To-do</button>
       </div>
     </div>
@@ -792,6 +857,7 @@ function renderTodoList() {
       <h2 style="font-size:15px;margin:20px 0 9px;color:var(--ink-faint)">Done</h2>
       <div class="card panel"><div class="todo-table">${done.map(todoRowHtml).join("")}</div></div>` : ""}`;
   wireWeekSeg();
+  $("#td-tags").onclick = tagManager;
   $("#td-add").onclick = () => taskEditor(null);
   $("#td-new").onclick = () => taskEditor(null);
   $$("#view-week [data-tck]").forEach(ck => ck.onclick = e => { e.stopPropagation(); toggleTaskDone(ck.dataset.tck); });
@@ -1044,10 +1110,20 @@ function attachBoardEvents(boardEl) {
    ============================================================ */
 function dailyItems(dow) {
   const rs = alive(S.routines).filter(r => r.days.includes(dow));
-  return {
-    anytime: rs.filter(r => !r.time).sort((a, b) => a.order - b.order),
-    timed: rs.filter(r => r.time).sort((a, b) => a.time.localeCompare(b.time) || a.order - b.order),
-  };
+  const timed = rs.filter(r => r.time).slice();
+  /* course meeting times appear automatically as classes */
+  for (const c of alive(S.courses)) {
+    (c.meetings || []).forEach((m, i) => {
+      if (m.days && m.days.includes(dow) && m.start) {
+        timed.push({
+          id: `crs-${c.id}-${i}`, title: c.code || c.name, kind: "class",
+          time: m.start, endTime: m.end || "", color: c.color, courseId: c.id, isCourse: true, order: 0,
+        });
+      }
+    });
+  }
+  timed.sort((a, b) => a.time.localeCompare(b.time) || (a.order || 0) - (b.order || 0));
+  return { anytime: rs.filter(r => !r.time).sort((a, b) => a.order - b.order), timed };
 }
 function timeRange(r) {
   return r.time ? fmtTime12(r.time) + (r.endTime ? "–" + fmtTime12(r.endTime) : "") : "";
@@ -1157,7 +1233,10 @@ function renderRoutine() {
   });
   $$("#view-routine [data-sched]").forEach(row => row.onclick = e => {
     if (e.target.closest(".ck")) return;
-    const r = S.routines.find(x => x.id === row.dataset.sched);
+    const id = row.dataset.sched;
+    const cm = id.match(/^crs-(.+)-\d+$/);
+    if (cm) { const c = courseById(cm[1]); if (c) courseDetail(c); return; }
+    const r = S.routines.find(x => x.id === id);
     if (r) routineEditor(r, dow);
   });
   $$("#view-routine [data-ack]").forEach(ck => ck.onclick = e => {
@@ -1226,7 +1305,8 @@ function routineEditor(r, defaultDow) {
       <button data-k="routine" class="${kind === "routine" ? "active" : ""}">Routine</button>
       <button data-k="class" class="${kind === "class" ? "active" : ""}">Class</button>
     </div><span class="hint">Classes show as solid colored blocks in the schedule.</span></div>
-    <div class="field"><label>What is it?</label><input id="re-title" value="${esc(r.title)}" placeholder="e.g. Gym, PSY 101 lecture, Call home"></div>
+    <div class="field" id="re-coursewrap" style="display:${kind === "class" ? "" : "none"}"><label>Course</label><select id="re-course">${courseOptions(r.courseId)}</select><span class="hint">Tip: meeting times saved on the course itself show up here automatically — use this only for extra sessions.</span></div>
+    <div class="field" id="re-titlewrap"><label id="re-titlelabel">${kind === "class" ? "Label (optional)" : "What is it?"}</label><input id="re-title" value="${esc(r.title)}" placeholder="${kind === "class" ? "uses the course name if left empty" : "e.g. Gym, Review notes, Call home"}"></div>
     <div class="fieldrow">
       <div class="field"><label>Starts <span style="text-transform:none;font-weight:400">(optional)</span></label><input id="re-time" type="time" value="${esc(r.time || "")}"></div>
       <div class="field"><label>Ends <span style="text-transform:none;font-weight:400">(optional)</span></label><input id="re-end" type="time" value="${esc(r.endTime || "")}"></div>
@@ -1250,6 +1330,9 @@ function routineEditor(r, defaultDow) {
   $$("#re-kind button").forEach(b => b.onclick = () => {
     kind = b.dataset.k;
     $$("#re-kind button").forEach(x => x.classList.toggle("active", x === b));
+    $("#re-coursewrap").style.display = kind === "class" ? "" : "none";
+    $("#re-titlelabel").textContent = kind === "class" ? "Label (optional)" : "What is it?";
+    $("#re-title").placeholder = kind === "class" ? "uses the course name if left empty" : "e.g. Gym, Review notes, Call home";
   });
   wireColorPick("re-colors", c => picked = c);
   $("#re-cancel").onclick = closeModal;
@@ -1257,16 +1340,20 @@ function routineEditor(r, defaultDow) {
     r.deleted = true; r.updatedAt = Date.now(); save(); closeModal(); render(); toast("Routine removed");
   }, true);
   $("#re-save").onclick = () => {
-    const title = $("#re-title").value.trim();
-    if (!title) { toast("Name the routine first"); return; }
+    let title = $("#re-title").value.trim();
+    const courseId = kind === "class" ? $("#re-course").value : "";
+    if (!title && courseId) title = courseLabel(courseId);
+    if (!title) { toast(kind === "class" ? "Pick a course or give it a label" : "Name the routine first"); return; }
     if (!days.length) { toast("Pick at least one day"); return; }
     const time = $("#re-time").value;
     const endTime = time ? $("#re-end").value : "";
+    let color = picked;
+    if (kind === "class" && !color && courseId) color = courseColor(courseId);
     if (isNew) {
       const order = S.routines.length ? Math.max(...S.routines.map(x => x.order)) + 1 : 0;
-      S.routines.push({ id: uid(), title, kind, time, endTime, days, color: picked, order, deleted: false, updatedAt: Date.now() });
+      S.routines.push({ id: uid(), title, kind, courseId, time, endTime, days, color, order, deleted: false, updatedAt: Date.now() });
     } else {
-      Object.assign(r, { title, kind, time, endTime, days, color: picked, updatedAt: Date.now() });
+      Object.assign(r, { title, kind, courseId, time, endTime, days, color, updatedAt: Date.now() });
     }
     save(); closeModal(); render(); toast(isNew ? "Routine added" : "Saved");
   };
@@ -1531,12 +1618,12 @@ async function gfetch(path, opts = {}) {
 async function ensureCalendar() {
   if (S.settings.gcalCalendarId) return S.settings.gcalCalendarId;
   const list = await gfetch("/users/me/calendarList?maxResults=250");
-  const found = (list?.items || []).find(c => c.summary === "Homeroom");
+  const found = (list?.items || []).find(c => c.summary === "ODO" || c.summary === "Homeroom");
   let id = found?.id;
   if (!id) {
     const created = await gfetch("/calendars", {
       method: "POST",
-      body: JSON.stringify({ summary: "Homeroom", description: "Assignments managed by Homeroom. Anything you add here gets pulled into the app too." }),
+      body: JSON.stringify({ summary: "ODO", description: "Assignments managed by ODO. Anything you add here gets pulled into the app too." }),
     });
     id = created?.id;
   }
@@ -1710,7 +1797,7 @@ async function supaFetch(method, query, body) {
 function sharedState() {
   return {
     courses: S.courses, assignments: S.assignments, tasks: S.tasks,
-    routines: S.routines, links: S.links, tags: S.tags,
+    routines: S.routines, links: S.links, tags: S.tags, tagsMeta: S.tagsMeta,
     routineChecks: S.routineChecks, routineCheckMeta: S.routineCheckMeta,
   };
 }
@@ -1734,8 +1821,13 @@ function mergeRemote(remote) {
       changed = true;
     }
   }
+  const tMeta = remote.tagsMeta || {};
   for (const name in (remote.tags || {})) {
-    if (!S.tags[name]) { S.tags[name] = remote.tags[name]; changed = true; }
+    if (!S.tags[name] || (tMeta[name] || 0) > (S.tagsMeta[name] || 0)) {
+      S.tags[name] = remote.tags[name];
+      if (tMeta[name]) S.tagsMeta[name] = tMeta[name];
+      changed = true;
+    }
   }
   return changed;
 }
@@ -1793,6 +1885,7 @@ function renderSettings() {
 
     <div class="card set-section">
       <h2>Personal touch</h2>
+      <div class="field" style="max-width:340px"><label>Your name</label><input id="st-name" value="${esc(s.userName || "")}" placeholder="How should ODO greet you? (optional)" autocomplete="off"></div>
       <div class="desc">A banner image for your dashboard — a photo, art, anything that feels like yours. Stays on this device.</div>
       ${s.banner ? `<img src="${s.banner}" alt="" style="width:100%;max-width:380px;height:90px;object-fit:cover;border-radius:10px;margin-bottom:11px;display:block">` : ""}
       <div style="display:flex;gap:9px;flex-wrap:wrap">
@@ -1814,7 +1907,7 @@ function renderSettings() {
 
     <div class="card set-section">
       <h2>Google Calendar</h2>
-      <div class="desc">Two-way sync into a dedicated "Homeroom" calendar in your Google account — so Google can handle reminders, and anything added there flows back here. Needs the one-time setup from the guide.</div>
+      <div class="desc">Two-way sync into a dedicated "ODO" calendar in your Google account — so Google can handle reminders, and anything added there flows back here. Needs the one-time setup from the guide.</div>
       <div class="field"><label>OAuth Client ID</label><input id="st-gcid" value="${esc(s.gcalClientId)}" placeholder="xxxxx.apps.googleusercontent.com" autocomplete="off"></div>
       <div style="display:flex;gap:9px;flex-wrap:wrap;align-items:center">
         <button class="btn primary" id="st-gconnect">${gcalLinked() ? "Sync now" : "Connect Google"}</button>
@@ -1842,7 +1935,7 @@ function renderSettings() {
         <input type="file" id="st-file" accept=".json" style="display:none">
       </div>
     </div>
-    <div class="hint" style="text-align:center;padding:4px 0 20px">Homeroom · made for one very organized semester</div>`;
+    <div class="hint" style="text-align:center;padding:4px 0 20px">ODO · One Day, or Day One</div>`;
 
   $$("#st-theme button").forEach(b => b.onclick = () => {
     s.theme = b.dataset.t; persist(); applyTheme(); renderSettings();
@@ -1853,6 +1946,7 @@ function renderSettings() {
   $$("#st-look button").forEach(b => b.onclick = () => {
     s.look = b.dataset.l; persist(); applyTheme(); renderSettings();
   });
+  $("#st-name").onchange = e => { s.userName = e.target.value.trim().slice(0, 30); persist(); toast(s.userName ? "Hi, " + s.userName : "Name cleared"); };
   $("#st-banner").onclick = () => $("#st-banner-file").click();
   if (s.banner) $("#st-banner-rm").onclick = () => { s.banner = ""; persist(); renderSettings(); toast("Banner removed"); };
   $("#st-banner-file").onchange = e => {
@@ -1897,7 +1991,7 @@ function renderSettings() {
     const blob = new Blob([JSON.stringify(S, null, 2)], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = "homeroom-backup-" + todayStr() + ".json";
+    a.download = "odo-backup-" + todayStr() + ".json";
     a.click();
     URL.revokeObjectURL(a.href);
   };
@@ -1912,7 +2006,7 @@ function renderSettings() {
         if (!o || !Array.isArray(o.assignments)) throw new Error("bad file");
         S = { ...structuredClone(DEFAULTS), ...o, settings: { ...DEFAULTS.settings, ...(o.settings || {}) } };
         save(); render(); toast("Backup restored");
-      } catch (err) { toast("That file doesn't look like a Homeroom backup"); }
+      } catch (err) { toast("That file doesn't look like an ODO backup"); }
     };
     reader.readAsText(f);
   };
