@@ -2,7 +2,7 @@
 /* ============================================================
    ODO — app logic
    ============================================================ */
-const APP_VERSION = "v9";
+const APP_VERSION = "v10";
 
 /* ---------- tiny helpers ---------- */
 const $ = s => document.querySelector(s);
@@ -169,7 +169,9 @@ function confirmBox(title, body, yesLabel, onYes, danger) {
 }
 
 /* ---------- navigation ---------- */
+const scrollMem = {}; /* per-tab scroll position */
 function nav(view) {
+  scrollMem[UI.view] = $("#main").scrollTop;
   UI.view = view;
   $$("[data-nav]").forEach(b => b.classList.toggle("active", b.dataset.nav === view));
   $$(".view").forEach(v => v.classList.toggle("active", v.id === "view-" + view));
@@ -187,7 +189,7 @@ function nav(view) {
     fab.onclick = fabActions[view] || null;
   }
   render();
-  $("#main").scrollTop = 0;
+  $("#main").scrollTop = scrollMem[view] || 0; /* come back where you left off */
 }
 $$("[data-nav]").forEach(b => b.addEventListener("click", () => nav(b.dataset.nav)));
 
@@ -953,7 +955,12 @@ function taskEditor(t) {
     <h2>${isNew ? "New to-do" : "Edit to-do"}</h2>
     <div class="field"><label>To-do</label><input id="te-title" value="${esc(base.title)}" placeholder="e.g. Email advisor about overrides"></div>
     <div class="fieldrow">
-      <div class="field"><label>Due / day</label><input id="te-day" type="date" value="${base.day === "someday" ? "" : esc(base.day)}"><span class="hint">Empty = Someday.</span></div>
+      <div class="field"><label>Due / day</label>
+        <div style="display:flex;gap:8px;align-items:stretch">
+          <input id="te-day" type="date" value="${base.day === "someday" ? "" : esc(base.day)}" style="flex:1">
+          <button class="btn small ${base.day === "someday" ? "primary" : "ghost"}" id="te-someday" type="button">Someday</button>
+        </div>
+        <span class="hint">Empty date = Someday.</span></div>
       <div class="field"><label>Tags</label><input id="te-tags" value="${esc((base.tags || []).join(", "))}" placeholder="research, admin" list="te-taglist" autocomplete="off"><datalist id="te-taglist">${allTags.map(n => `<option value="${esc(n)}">`).join("")}</datalist><span class="hint">Comma-separated. New names become new tags.</span></div>
     </div>
     <div class="field"><label>Description</label><textarea id="te-notes" placeholder="optional details…">${esc(base.notes || "")}</textarea></div>
@@ -966,6 +973,17 @@ function taskEditor(t) {
       <button class="btn primary" id="te-save">${isNew ? "Add to-do" : "Save"}</button>
     </div>`);
   wireColorPick("te-colors", c => picked = c);
+  $("#te-someday").onclick = () => {
+    $("#te-day").value = "";
+    $("#te-someday").classList.remove("ghost");
+    $("#te-someday").classList.add("primary");
+    toast("Parked in Someday");
+  };
+  $("#te-day").onchange = () => {
+    const sd = $("#te-someday");
+    sd.classList.toggle("primary", !$("#te-day").value);
+    sd.classList.toggle("ghost", !!$("#te-day").value);
+  };
   $("#te-cancel").onclick = closeModal;
   if (!isNew) $("#te-del").onclick = () => { t.deleted = true; t.updatedAt = Date.now(); save(); closeModal(); render(); toast("Deleted"); };
   $("#te-save").onclick = () => {
@@ -2126,8 +2144,34 @@ function renderSettings() {
 /* ============================================================
    INIT
    ============================================================ */
+function initPullToRefresh() {
+  const main = $("#main");
+  const hint = $("#ptr-hint");
+  const IDLE = "pull down to refresh · " + APP_VERSION;
+  if (hint) hint.textContent = IDLE;
+  let startY = null, armed = false;
+  main.addEventListener("touchstart", e => {
+    startY = main.scrollTop <= 0 ? e.touches[0].clientY : null;
+    armed = false;
+  }, { passive: true });
+  main.addEventListener("touchmove", e => {
+    if (startY === null) return;
+    if (main.scrollTop > 2) { startY = null; armed = false; if (hint) hint.textContent = IDLE; return; }
+    const dy = e.touches[0].clientY - startY;
+    if (dy > 100 && !armed) { armed = true; if (hint) hint.textContent = "release to refresh"; }
+    else if (dy <= 100 && armed) { armed = false; if (hint) hint.textContent = IDLE; }
+  }, { passive: true });
+  main.addEventListener("touchend", () => {
+    if (armed) {
+      if (hint) hint.textContent = "refreshing…";
+      setTimeout(() => location.reload(), 120);
+    }
+    startY = null; armed = false;
+  });
+}
 function init() {
   applyTheme();
+  initPullToRefresh();
   $("#themebtn").onclick = () => {
     const dark = document.documentElement.dataset.theme === "dark";
     S.settings.theme = dark ? "light" : "dark";
