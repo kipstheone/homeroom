@@ -2,7 +2,7 @@
 /* ============================================================
    ODO — app logic
    ============================================================ */
-const APP_VERSION = "v0.15";
+const APP_VERSION = "v0.16";
 
 /* ---------- tiny helpers ---------- */
 const $ = s => document.querySelector(s);
@@ -155,10 +155,14 @@ function toast(msg) {
 function openModal(html) {
   $("#modal").innerHTML = html;
   $("#modal-veil").classList.add("open");
+  /* pin the sheet to the true bottom once its open animation settles */
+  setTimeout(() => { try { edgePinApply(); } catch (e) { } }, 260);
 }
 function closeModal() {
   $("#modal-veil").classList.remove("open");
-  $("#modal").innerHTML = "";
+  const m = $("#modal");
+  m.innerHTML = "";
+  m.style.transform = "";
 }
 $("#modal-veil").addEventListener("pointerdown", e => { if (e.target.id === "modal-veil") closeModal(); });
 addEventListener("keydown", e => { if (e.key === "Escape") closeModal(); });
@@ -2112,7 +2116,13 @@ function renderSettings() {
         <input type="file" id="st-file" accept=".json" style="display:none">
       </div>
     </div>
-    <div class="hint" style="text-align:center;padding:4px 0 20px">ODO ${APP_VERSION} · One Day, or Day One</div>`;
+    <div class="hint" style="text-align:center;padding:4px 0 20px">ODO ${APP_VERSION} · One Day, or Day One<br>
+      <span style="font-size:10px;opacity:.7">${(() => {
+        const vv = window.visualViewport;
+        const tb = $("#tabbar");
+        const tbb = tb ? Math.round(tb.getBoundingClientRect().bottom) : 0;
+        return `ih:${window.innerHeight} vv:${vv ? Math.round(vv.height) + "+" + Math.round(vv.offsetTop) : "–"} icb:${document.documentElement.clientHeight} scr:${screen.height} bar:${tbb}`;
+      })()}</span></div>`;
 
   $$("#st-theme button").forEach(b => b.onclick = () => {
     s.theme = b.dataset.t; persist(); applyTheme(); renderSettings();
@@ -2224,6 +2234,49 @@ function fixViewportHeight() {
   setTimeout(set, 1200);
   setInterval(set, 4000); /* cheap insurance against late iOS viewport shenanigans */
 }
+/* ============================================================
+   EDGE PIN — closed-loop fix for the iOS bottom-gap bug.
+   Instead of predicting the viewport, we MEASURE where the tab bar
+   actually rendered vs. where the visible bottom actually is, and
+   shift it by the measured difference. Re-checks continuously.
+   ============================================================ */
+function visibleBottom() {
+  const vv = window.visualViewport;
+  return vv ? vv.offsetTop + vv.height : window.innerHeight;
+}
+function edgePinApply() {
+  const vb = visibleBottom();
+  const tb = $("#tabbar");
+  let delta = 0;
+  if (tb && getComputedStyle(tb).display !== "none") {
+    tb.style.transform = "";
+    const r = tb.getBoundingClientRect();
+    delta = vb - r.bottom;
+    if (Math.abs(delta) > 1) tb.style.transform = `translateY(${delta}px)`;
+    else delta = 0;
+    /* the floating + button rides along with the same correction */
+    const fab = $("#fab");
+    if (fab) fab.style.transform = delta ? `translateY(${delta}px)` : "";
+  }
+  /* pin the bottom-sheet too (mobile only — on desktop it's centered) */
+  const veil = $("#modal-veil");
+  if (veil && veil.classList.contains("open") && matchMedia("(max-width: 699px)").matches) {
+    const m = $("#modal");
+    m.style.transform = "";
+    const mr = m.getBoundingClientRect();
+    const md = vb - mr.bottom;
+    if (Math.abs(md) > 1) m.style.transform = `translateY(${md}px)`;
+  }
+}
+function startEdgePin() {
+  edgePinApply();
+  setInterval(edgePinApply, 400);
+  addEventListener("resize", edgePinApply);
+  window.visualViewport?.addEventListener("resize", edgePinApply);
+  window.visualViewport?.addEventListener("scroll", edgePinApply);
+  addEventListener("orientationchange", () => { setTimeout(edgePinApply, 150); setTimeout(edgePinApply, 500); });
+  addEventListener("pageshow", edgePinApply);
+}
 function initPullToRefresh() {
   const main = $("#main");
   const hint = $("#ptr-hint");
@@ -2252,6 +2305,7 @@ function initPullToRefresh() {
 function init() {
   applyTheme();
   fixViewportHeight();
+  startEdgePin();
   initPullToRefresh();
   $("#themebtn").onclick = () => {
     const dark = document.documentElement.dataset.theme === "dark";

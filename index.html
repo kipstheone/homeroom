@@ -348,8 +348,7 @@ html{background:var(--bg)}
   animation:slideup .22s cubic-bezier(.3,1.2,.4,1);
 }
 @media(max-width:699px){
-  /* bottom sheet bleeds below the visible edge so no iOS gap can show under it */
-  #modal{margin-bottom:-160px;padding-bottom:calc(182px + env(safe-area-inset-bottom))}
+  #modal{padding-bottom:calc(26px + env(safe-area-inset-bottom))}
 }
 @media(min-width:700px){
   #modal-veil{align-items:center;padding:20px}
