@@ -1749,8 +1749,8 @@ async function gcalSync(interactive = false) {
     persist();
     scheduleCloudPush();
     setPill("synced " + new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }), true);
-    render();
-    if (interactive) toast("Google Calendar connected");
+    if (UI.view !== "settings") render();
+    if (interactive) { render(); toast("Google Calendar connected"); }
   } catch (e) {
     console.warn("gcal sync", e);
     setPill("Google sync hiccup", false, true);
@@ -1842,7 +1842,8 @@ async function cloudSync() {
     persist();
     await supaFetch("POST", "", [{ id: S.settings.syncId, state: sharedState(), updated_at: new Date().toISOString() }]);
     setPill("synced " + new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }), true);
-    if (changed && !$("#modal-veil").classList.contains("open")) render();
+    /* never re-render Settings from a background sync — it would wipe half-typed fields */
+    if (changed && UI.view !== "settings" && !$("#modal-veil").classList.contains("open")) render();
   } catch (e) {
     console.warn("cloud sync", e);
     setPill("device sync hiccup", false, true);
@@ -1853,6 +1854,59 @@ async function cloudSync() {
 /* ============================================================
    SETTINGS
    ============================================================ */
+const GH_ORIGIN = "https://kipstheone.github.io";
+const SUPA_SQL = `create table homeroom_state (
+  id text primary key,
+  state jsonb,
+  updated_at timestamptz default now()
+);
+alter table homeroom_state enable row level security;
+create policy "open access" on homeroom_state
+  for all using (true) with check (true);`;
+function copyText(txt, label) {
+  if (navigator.clipboard?.writeText) navigator.clipboard.writeText(txt).then(() => toast(label + " copied"), () => toast("Couldn't copy — select it manually"));
+  else toast("Couldn't copy — select it manually");
+}
+const helpStep = (n, html) => `<div style="display:flex;gap:10px;margin-bottom:11px">
+  <span style="flex-shrink:0;width:22px;height:22px;border-radius:50%;background:var(--accent-soft);color:var(--accent-ink);font-size:12px;font-weight:800;display:inline-flex;align-items:center;justify-content:center">${n}</span>
+  <span style="font-size:14px;line-height:1.5">${html}</span>
+</div>`;
+const helpCode = (txt) => `<code style="display:block;background:var(--bg-soft);border:1px solid var(--line);border-radius:8px;padding:7px 10px;font-size:12px;word-break:break-all;margin-top:5px;white-space:pre-wrap">${esc(txt)}</code>`;
+function gcalHelp() {
+  openModal(`
+    <h2>Google Calendar setup</h2>
+    <p class="hint" style="margin:-8px 0 14px">One-time, ~15 minutes, free. You need a Google account.</p>
+    ${helpStep(1, `Go to <a href="https://console.cloud.google.com" target="_blank" rel="noopener">console.cloud.google.com</a> and sign in with the Google account whose calendar you want.`)}
+    ${helpStep(2, `Top bar → project dropdown → <b>New Project</b>. Name it <b>odo</b>, create it, make sure it's selected.`)}
+    ${helpStep(3, `Search for <b>Google Calendar API</b> → open it → <b>Enable</b>.`)}
+    ${helpStep(4, `Menu → <b>APIs &amp; Services → OAuth consent screen</b>. App name <b>ODO</b>, your email, audience <b>External</b>. Then under Audience / Test users, click <b>Add users</b> and add <b>your own Gmail address</b>. (Sign-in will say the app is unverified — normal for personal apps, hit Continue.)`)}
+    ${helpStep(5, `Menu → <b>Credentials → Create credentials → OAuth client ID</b>. Type: <b>Web application</b>. Under <b>Authorized JavaScript origins</b>, add exactly:
+      ${helpCode(GH_ORIGIN)}
+      <button class="btn small" id="gh-copyorigin" style="margin-top:6px">Copy origin</button>
+      <span class="hint" style="display:block;margin-top:5px">No trailing slash, no /homeroom path. Testing on a computer too? Also add http://localhost:8000.</span>`)}
+    ${helpStep(6, `Click <b>Create</b>, copy the <b>Client ID</b> (ends in .apps.googleusercontent.com), paste it in the field below this guide, then hit <b>Connect Google</b>.`)}
+    <p class="hint">Friends using your hosted app: add their Gmail as a test user in step 4, or they can skip calendar sync entirely.</p>
+    <div class="modal-actions"><button class="btn primary" id="gh-done">Got it</button></div>`);
+  $("#gh-copyorigin").onclick = () => copyText(GH_ORIGIN, "Origin");
+  $("#gh-done").onclick = closeModal;
+}
+function supaHelp() {
+  openModal(`
+    <h2>Device sync setup</h2>
+    <p class="hint" style="margin:-8px 0 14px">One-time, ~10 minutes, free. Keeps phone + laptop identical.</p>
+    ${helpStep(1, `Go to <a href="https://supabase.com" target="_blank" rel="noopener">supabase.com</a> → Start your project → sign up (GitHub login is easiest).`)}
+    ${helpStep(2, `<b>New project</b>. Name <b>odo</b>, any database password (you won't need it again), nearest region. Wait ~1 min.`)}
+    ${helpStep(3, `Left sidebar → <b>SQL Editor</b> → New query → paste this and <b>Run</b>:
+      ${helpCode(SUPA_SQL)}
+      <button class="btn small" id="sh-copysql" style="margin-top:6px">Copy SQL</button>`)}
+    ${helpStep(4, `Gear icon → <b>Project Settings → API Keys</b>. Copy the <b>anon public</b> key (or the newer <b>sb_publishable_…</b> key — either works). The <b>Project URL</b> (https://xxxx.supabase.co) is under Settings → Data API.`)}
+    ${helpStep(5, `Paste both into the fields below this guide, then invent a <b>sync code</b> — a long passphrase only you know. It's the password to your data, so make it weird.`)}
+    ${helpStep(6, `Hit <b>Save &amp; sync now</b>. Repeat the same three values on your other device, and you're done — they stay in step automatically.`)}
+    <p class="hint">Sharing with friends: same project is fine, but each person should use their <b>own</b> sync code.</p>
+    <div class="modal-actions"><button class="btn primary" id="sh-done">Got it</button></div>`);
+  $("#sh-copysql").onclick = () => copyText(SUPA_SQL, "SQL");
+  $("#sh-done").onclick = closeModal;
+}
 function renderSettings() {
   const s = S.settings;
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -1906,8 +1960,8 @@ function renderSettings() {
     </div>
 
     <div class="card set-section">
-      <h2>Google Calendar</h2>
-      <div class="desc">Two-way sync into a dedicated "ODO" calendar in your Google account — so Google can handle reminders, and anything added there flows back here. Needs the one-time setup from the guide.</div>
+      <h2>Google Calendar <button class="seemore" id="st-ghelp">setup instructions</button></h2>
+      <div class="desc">Two-way sync into a dedicated "ODO" calendar in your Google account — so Google can handle reminders, and anything added there flows back here. Fields save as you type.</div>
       <div class="field"><label>OAuth Client ID</label><input id="st-gcid" value="${esc(s.gcalClientId)}" placeholder="xxxxx.apps.googleusercontent.com" autocomplete="off"></div>
       <div style="display:flex;gap:9px;flex-wrap:wrap;align-items:center">
         <button class="btn primary" id="st-gconnect">${gcalLinked() ? "Sync now" : "Connect Google"}</button>
@@ -1917,8 +1971,8 @@ function renderSettings() {
     </div>
 
     <div class="card set-section">
-      <h2>Device sync</h2>
-      <div class="desc">Keeps courses, routines, and tasks identical on your phone and laptop via your free Supabase project. Use the same sync code on every device.</div>
+      <h2>Device sync <button class="seemore" id="st-shelp">setup instructions</button></h2>
+      <div class="desc">Keeps courses, routines, and tasks identical on your phone and laptop via your free Supabase project. Use the same three values on every device. Fields save as you type — paste them one at a time, no rush.</div>
       <div class="field"><label>Supabase project URL</label><input id="st-surl" value="${esc(s.supaUrl)}" placeholder="https://xxxx.supabase.co" autocomplete="off"></div>
       <div class="field"><label>Supabase anon key</label><input id="st-skey" value="${esc(s.supaKey)}" placeholder="eyJhbGciOi…" autocomplete="off"></div>
       <div class="field"><label>Sync code</label><input id="st-sid" value="${esc(s.syncId)}" placeholder="something long and personal, like a passphrase" autocomplete="off"><span class="hint">Acts like a password for your data — make it long and unguessable.</span></div>
@@ -1972,18 +2026,19 @@ function renderSettings() {
     reader.readAsDataURL(f);
   };
   $("#st-ahead").onchange = e => { s.testLookahead = +e.target.value; save(); };
+  /* auto-save sync fields as they're typed/pasted, so nothing is lost if the view re-renders */
+  $("#st-gcid").oninput = e => { s.gcalClientId = e.target.value.trim(); tokenClient = null; persist(); };
+  $("#st-surl").oninput = e => { s.supaUrl = e.target.value.trim(); persist(); };
+  $("#st-skey").oninput = e => { s.supaKey = e.target.value.trim(); persist(); };
+  $("#st-sid").oninput = e => { s.syncId = e.target.value.trim(); persist(); };
+  $("#st-ghelp").onclick = gcalHelp;
+  $("#st-shelp").onclick = supaHelp;
   $("#st-gconnect").onclick = () => {
-    const v = $("#st-gcid").value.trim();
-    if (v !== s.gcalClientId) { s.gcalClientId = v; tokenClient = null; persist(); }
     if (!s.gcalClientId) { toast("Paste your Client ID first"); return; }
     gcalSync(!gcalLinked());
   };
   if (gcalLinked()) $("#st-gdisc").onclick = () => { gcalDisconnect(); renderSettings(); toast("Google disconnected"); };
   $("#st-ssave").onclick = () => {
-    s.supaUrl = $("#st-surl").value.trim();
-    s.supaKey = $("#st-skey").value.trim();
-    s.syncId = $("#st-sid").value.trim();
-    persist();
     if (supaConfigured()) { cloudSync(); toast("Syncing…"); }
     else toast("Fill in all three fields to enable sync");
   };
