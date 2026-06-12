@@ -2,7 +2,7 @@
 /* ============================================================
    ODO — app logic
    ============================================================ */
-const APP_VERSION = "v14";
+const APP_VERSION = "v0.15";
 
 /* ---------- tiny helpers ---------- */
 const $ = s => document.querySelector(s);
@@ -299,10 +299,10 @@ function tagChip(name) {
 function parseTags(str) {
   return [...new Set(String(str || "").split(",").map(s => s.trim()).filter(Boolean))].slice(0, 8);
 }
-function daysLeftLabel(due) {
+function daysLeftLabel(due, todayTxt = "today") {
   const d = dayDiff(todayStr(), due);
   if (d < 0) return { txt: Math.abs(d) + " over", cls: "urgent" };
-  if (d === 0) return { txt: "due today", cls: "urgent" };
+  if (d === 0) return { txt: todayTxt, cls: "urgent" };
   if (d === 1) return { txt: "1 day", cls: "soon" };
   if (d <= 3) return { txt: d + " days", cls: "soon" };
   return { txt: d + " days", cls: "" };
@@ -400,7 +400,9 @@ function greeting() {
   return { part, line: lines[parseDate(todayStr()).getDate() % lines.length] };
 }
 function dueRowHtml(a) {
-  const over = a.status !== "Done" && dayDiff(todayStr(), a.due) < 0;
+  const dd = dayDiff(todayStr(), a.due);
+  const urgent = a.status !== "Done" && dd <= 0;
+  const whenTxt = (a.status !== "Done" && dd === 0) ? "due today" : relDay(a.due);
   const tc = typeColor(a.type);
   const fill = S.settings.dueStyle === "fill";
   const rowStyle = fill ? ` style="background:color-mix(in srgb, ${tc} 14%, var(--card));border-color:color-mix(in srgb, ${tc} 38%, var(--line))"` : "";
@@ -409,7 +411,7 @@ function dueRowHtml(a) {
     ${fill ? "" : `<span class="duedot" style="background:${tc}"></span>`}
     <span class="t">${esc(a.title)}</span>
     ${typeChip(a.type)}
-    <span class="when" ${over ? 'style="color:var(--danger)"' : ""}>${relDay(a.due)}${a.time ? " " + fmtTime12(a.time) : ""}</span>
+    <span class="when" ${urgent ? 'style="color:var(--danger)"' : ""}>${whenTxt}${a.time ? " " + fmtTime12(a.time) : ""}</span>
   </div>`;
 }
 function dashCalHtml() {
@@ -1466,8 +1468,9 @@ function renderCalTable() {
       <div class="todo-head"><span></span><span>Assignment</span><span style="text-align:right">Course · type</span><span style="text-align:right">Due</span><span style="text-align:right">Days left</span></div>
       ${list.length ? list.map(a => {
         const done = a.status === "Done";
-        const dl = done ? null : daysLeftLabel(a.due);
-        return `<div class="todo-row ${done ? "done" : ""}" data-asg="${a.id}">
+        const dl = done ? null : daysLeftLabel(a.due, "due today");
+        const tc = typeColor(a.type);
+        return `<div class="todo-row ${done ? "done" : ""}" data-asg="${a.id}" style="background:color-mix(in srgb, ${tc} 10%, var(--card))">
           <span class="ck ${done ? "on" : ""}" data-ack="${a.id}" style="width:19px;height:19px"><svg viewBox="0 0 24 24"><path d="M4 12.5 10 18.5 20 6"/></svg></span>
           <span class="tt">${esc(a.title)}</span>
           <span class="tags">${a.courseId ? `<span class="chip c-faint">${esc(courseLabel(a.courseId))}</span>` : ""}${typeChip(a.type)}</span>
@@ -1574,8 +1577,9 @@ function renderCalList() {
     <div class="asg-table">
       ${list.length ? list.map(a => {
         const over = a.status !== "Done" && dayDiff(today, a.due) < 0;
-        return `<div class="asgrow ${a.status === "Done" ? "done" : ""}" data-asg="${a.id}">
-          <span class="bar" style="background:${typeColor(a.type)}"></span>
+        const tc = typeColor(a.type);
+        return `<div class="asgrow ${a.status === "Done" ? "done" : ""}" data-asg="${a.id}" style="background:color-mix(in srgb, ${tc} 11%, var(--card));border-color:color-mix(in srgb, ${tc} 32%, var(--line))">
+          <span class="bar" style="background:${tc}"></span>
           <span class="t">${esc(a.title)}</span>
           ${typeChip(a.type)}
           ${a.courseId ? `<span class="chip c-faint">${esc(courseLabel(a.courseId))}</span>` : ""}
