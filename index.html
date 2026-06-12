@@ -98,8 +98,9 @@ img{user-select:none}
 
 /* ---------- layout ---------- */
 html{background:var(--bg)}
-/* fixed shell: kills the phantom gap below the tab bar in the installed iOS app */
-#app{display:flex;position:fixed;inset:0;height:auto}
+/* fixed shell sized by JS-measured screen height (--vh): iOS standalone lies about its viewport,
+   so we measure it ourselves and anchor the tab bar inside the shell */
+#app{display:flex;position:fixed;top:0;left:0;right:0;height:var(--vh,100dvh)}
 #ptr-hint{display:none;text-align:center;font-size:10.5px;font-weight:700;letter-spacing:.05em;color:var(--ink-faint);padding:0 0 10px;text-transform:uppercase}
 #sidebar{
   width:218px;flex-shrink:0;display:flex;flex-direction:column;gap:4px;
@@ -337,7 +338,7 @@ html{background:var(--bg)}
 
 /* ---------- modal & toast ---------- */
 #modal-veil{
-  position:fixed;inset:0;background:rgba(30,24,16,.45);z-index:50;display:none;
+  position:fixed;top:0;left:0;right:0;height:var(--vh,100dvh);background:rgba(30,24,16,.45);z-index:50;display:none;
   align-items:flex-end;justify-content:center;backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px);
 }
 #modal-veil.open{display:flex}
@@ -533,7 +534,7 @@ html{background:var(--bg)}
 .sched-anytime{font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint);padding:2px 0 4px}
 
 /* ---------- fab / banner / header highlights ---------- */
-#fab{display:none;position:fixed;right:18px;bottom:calc(88px + env(safe-area-inset-bottom));width:56px;height:56px;border-radius:50%;background:var(--accent);color:#fff;align-items:center;justify-content:center;box-shadow:var(--shadow-lift);z-index:45;border:none}
+#fab{display:none;position:absolute;right:18px;bottom:calc(88px + env(safe-area-inset-bottom));width:56px;height:56px;border-radius:50%;background:var(--accent);color:#fff;align-items:center;justify-content:center;box-shadow:var(--shadow-lift);z-index:45;border:none}
 #fab:active{transform:scale(.93)}
 [data-theme="dark"] #fab{color:#16110d}
 #fab.hidden{display:none!important}
@@ -565,7 +566,7 @@ html{background:var(--bg)}
   .viewhead .btn.primary{display:none} /* FAB replaces it */
   #ptr-hint{display:block}
   #tabbar{
-    display:flex;position:fixed;bottom:0;left:0;right:0;z-index:40;
+    display:flex;position:absolute;bottom:0;left:0;right:0;z-index:40;
     background:color-mix(in srgb,var(--card) 88%,transparent);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
     border-top:1px solid var(--line);padding:7px 6px calc(7px + env(safe-area-inset-bottom));
     justify-content:space-around;
@@ -624,9 +625,9 @@ html{background:var(--bg)}
     <button data-nav="courses"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c0 1.7 2.7 3 6 3s6-1.3 6-3v-5"/></svg>Courses</button>
     <button data-nav="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v3M12 20v3M4.2 4.2l2.2 2.2M17.6 17.6l2.2 2.2M1 12h3M20 12h3M4.2 19.8l2.2-2.2M17.6 6.4l2.2-2.2"/></svg>More</button>
   </nav>
-</div>
 
-<button id="fab" aria-label="add new"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
+  <button id="fab" aria-label="add new"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
+</div>
 
 <div id="modal-veil"><div id="modal" role="dialog"></div></div>
 <div id="toast"></div>

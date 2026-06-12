@@ -2,7 +2,7 @@
 /* ============================================================
    ODO — app logic
    ============================================================ */
-const APP_VERSION = "v10";
+const APP_VERSION = "v11";
 
 /* ---------- tiny helpers ---------- */
 const $ = s => document.querySelector(s);
@@ -2144,6 +2144,18 @@ function renderSettings() {
 /* ============================================================
    INIT
    ============================================================ */
+function fixViewportHeight() {
+  /* iOS standalone sometimes reports a layout viewport shorter than the screen,
+     leaving a dead strip under the tab bar. Measure the real height ourselves. */
+  const set = () => document.documentElement.style.setProperty("--vh", window.innerHeight + "px");
+  set();
+  addEventListener("resize", set);
+  addEventListener("orientationchange", () => { setTimeout(set, 100); setTimeout(set, 400); });
+  addEventListener("pageshow", set);
+  /* belt and braces: iOS occasionally settles late after launch */
+  setTimeout(set, 300);
+  setTimeout(set, 1200);
+}
 function initPullToRefresh() {
   const main = $("#main");
   const hint = $("#ptr-hint");
@@ -2171,6 +2183,7 @@ function initPullToRefresh() {
 }
 function init() {
   applyTheme();
+  fixViewportHeight();
   initPullToRefresh();
   $("#themebtn").onclick = () => {
     const dark = document.documentElement.dataset.theme === "dark";
