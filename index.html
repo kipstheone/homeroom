@@ -490,14 +490,17 @@ html{background:var(--bg)}
 
 /* ---------- to-do table ---------- */
 .todo-table{display:flex;flex-direction:column}
-.todo-head,.todo-row{display:grid;grid-template-columns:26px minmax(0,1fr) auto auto auto;gap:10px;align-items:center;padding:9px 8px}
+/* 4 cols: checkbox | title+tags | due | days-left */
+.todo-head,.todo-row{display:grid;grid-template-columns:26px minmax(0,1fr) auto auto;gap:10px;align-items:center;padding:9px 8px}
 .todo-head{font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint);border-bottom:1.5px solid var(--line-strong);padding-bottom:6px}
-.todo-row{border-bottom:1px solid var(--line);cursor:pointer}
-.todo-row:hover{background:var(--bg-soft)}
-.todo-row .tt{font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.todo-row .tt .desc-dot{color:var(--ink-faint);font-weight:400;font-size:12px}
-.todo-row.done .tt{text-decoration:line-through;color:var(--ink-faint)}
-.todo-row .tags{display:flex;gap:5px;flex-wrap:wrap;max-width:200px;justify-content:flex-end}
+.todo-row{border-bottom:1px solid var(--line);cursor:pointer;border-radius:0}
+.todo-row:hover{filter:brightness(.97)}
+/* title column: flex column so tags sit on a second line */
+.todo-row .tt{display:flex;flex-direction:column;gap:4px;min-width:0;overflow:hidden}
+.tt-text{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tt-text .desc-dot{color:var(--ink-faint);font-weight:400;font-size:12px}
+.tt-tags{display:flex;flex-wrap:wrap;gap:4px}
+.todo-row.done .tt-text{text-decoration:line-through;color:var(--ink-faint)}
 .tagchip{font-size:11px;font-weight:700;padding:2.5px 9px;border-radius:6px;white-space:nowrap}
 .todo-row .due-d{font-size:12.5px;color:var(--ink-soft);font-weight:600;white-space:nowrap;text-align:right;min-width:74px}
 .left-d{font-size:11.5px;font-weight:800;white-space:nowrap;text-align:right;min-width:62px;color:var(--ink-faint)}
@@ -505,6 +508,8 @@ html{background:var(--bg)}
 .left-d.soon{color:var(--accent-ink)}
 .todo-row .lkico{color:var(--ink-faint)}
 .todo-row .lkico:hover{color:var(--accent-ink)}
+/* assignment table keeps 5 columns (has course/type chip column) */
+.asg-table .todo-head,.asg-table .todo-row{grid-template-columns:26px minmax(0,1fr) auto auto auto}
 .todo-new{display:flex;align-items:center;gap:8px;padding:10px 8px;color:var(--ink-faint);font-weight:600;font-size:14px;cursor:pointer;border-radius:8px}
 .todo-new:hover{background:var(--bg-soft);color:var(--ink-soft)}
 .mini-todo{display:grid;grid-template-columns:24px minmax(0,1fr) auto auto;gap:9px;align-items:center;padding:7px 6px;border-bottom:1px solid var(--line)}
@@ -564,8 +569,6 @@ html{background:var(--bg)}
   #fab{display:flex}
   .banner{height:110px;margin-top:2px}
   .todo-head{display:none}
-  .todo-row{grid-template-columns:26px minmax(0,1fr) auto auto}
-  .todo-row .tags{display:none}
   .todo-row .due-d{min-width:0}
   .viewhead .btn.primary{display:none} /* FAB replaces it */
   #ptr-hint{display:block}

@@ -101,7 +101,7 @@ const DEFAULTS = {
     { id: "lk-canvas", title: "Canvas", url: "https://canvas.instructure.com", color: "#5f7d54", updatedAt: 1, deleted: false },
   ],
   settings: {
-    theme: "auto", palette: "hearth", look: "paper", dashLayout: null, banner: "", userName: "", dueStyle: "dot",
+    theme: "auto", palette: "hearth", look: "paper", dashLayout: null, banner: "", userName: "", dueStyle: "dot", todoStyle: "dot",
     testLookahead: 14, weeksShown: 1,
     gcalClientId: "", gcalCalendarId: "", gcalHint: "",
     supaUrl: "", supaKey: "", syncId: "",
@@ -135,7 +135,7 @@ const UI = {
   view: "home", dashTab: "tomorrow", boardOffset: 0,
   routineDate: todayStr(), calMonth: null, calMode: "month",
   asgCourse: "all", asgType: "all", asgHideDone: false,
-  homeCal: null, homeTodoCal: null, dashTodoMode: "list",
+  homeCal: null, dashCalTodos: false,
   linkEdit: false, arrange: false, weekMode: "list",
 };
 
@@ -477,25 +477,52 @@ function dashCalHtml() {
   const lead = (new Date(y, m, 1).getDay() + 6) % 7; /* Monday start */
   const dim = new Date(y, m + 1, 0).getDate();
   const rows = Math.ceil((lead + dim) / 7);
+  /* build per-day event lists — assignments always, tasks when toggled */
   const byDay = {};
-  for (const a of dueAssignments()) (byDay[a.due] = byDay[a.due] || []).push(a);
+  for (const a of dueAssignments()) {
+    (byDay[a.due] = byDay[a.due] || { asg: [], tasks: [] }).asg.push(a);
+  }
+  if (UI.dashCalTodos) {
+    for (const t of alive(S.tasks).filter(x => x.day !== "someday")) {
+      if (!byDay[t.day]) byDay[t.day] = { asg: [], tasks: [] };
+      byDay[t.day].tasks.push(t);
+    }
+  }
   const today = todayStr();
   let cells = "";
   for (let i = 0; i < rows * 7; i++) {
     const d = new Date(y, m, i - lead + 1);
     const ds = fmtDate(d);
     const inM = d.getMonth() === m;
-    const evs = byDay[ds] || [];
+    const { asg = [], tasks = [] } = byDay[ds] || {};
+    const allEvs = [...asg, ...tasks];
+    /* event chips: assignments show type glyph, tasks show a small circle */
+    const chips = [
+      ...asg.slice(0, 2).map(a => `<span class="calev ${a.status === "Done" ? "struck" : ""}" style="background:${typeColor(a.type)}">${typeGlyph(a.type, 9)}${esc(a.title)}</span>`),
+      ...(UI.dashCalTodos ? tasks.slice(0, Math.max(0, 2 - asg.length)).map(t => {
+        const tc = (t.tags || [])[0] ? tagColor(t.tags[0]) : (t.color || "#8fa3ad");
+        return `<span class="calev ${t.done ? "struck" : ""}" style="background:${tc}">◉ ${esc(t.title)}</span>`;
+      }) : []),
+    ];
+    const dotbar = [
+      ...asg.slice(0, 6).map(a => `<span class="evdot" style="background:${typeColor(a.type)};${a.status === "Done" ? "opacity:.35" : ""}"></span>`),
+      ...(UI.dashCalTodos ? tasks.slice(0, Math.max(0, 6 - asg.length)).map(t => {
+        const tc = (t.tags || [])[0] ? tagColor(t.tags[0]) : (t.color || "#8fa3ad");
+        return `<span class="evdot" style="background:${tc};${t.done ? "opacity:.35" : ""}"></span>`;
+      }) : []),
+    ];
+    const shown = chips.length;
+    const extra = allEvs.length - shown;
     cells += `<div class="calcell ${inM ? "" : "dim"} ${ds === today ? "today" : ""}" data-mday="${ds}">
       <span class="dnum">${d.getDate()}</span>
-      ${evs.slice(0, 2).map(a => `<span class="calev ${a.status === "Done" ? "struck" : ""}" style="background:${typeColor(a.type)}">${typeGlyph(a.type, 9)}${esc(a.title)}</span>`).join("")}
-      ${evs.length > 2 ? `<span class="calmore">+${evs.length - 2} more</span>` : ""}
-      <span class="dotbar">${evs.slice(0, 6).map(a => `<span class="evdot" style="background:${typeColor(a.type)};${a.status === "Done" ? "opacity:.35" : ""}"></span>`).join("")}</span>
+      ${chips.join("")}
+      ${extra > 0 ? `<span class="calmore">+${extra} more</span>` : ""}
+      <span class="dotbar">${dotbar.join("")}</span>
     </div>`;
   }
   return `
     <div class="mc-head">
-      <span class="mc-title">${MONTHS[m]} ${y}</span>
+      <span class="mc-title">${MONTHS[m]} ${y} <button class="seemore" id="dc-todotog" style="font-size:11px">${UI.dashCalTodos ? "hide to-dos" : "+ to-dos"}</button></span>
       <span style="display:flex;gap:5px">
         <button class="btn small" id="mc-prev" aria-label="previous month">‹</button>
         <button class="btn small ghost" id="mc-today">Today</button>
@@ -532,62 +559,21 @@ function arrBar(area) {
     <button data-arr="hl" title="header color">Color</button>
   </div>`;
 }
-/* Render a task row styled like a Coming-up duerow (tag color bar, no checkbox) */
+/* Render a task row styled like a Coming-up duerow (filled or dots style via todoStyle) */
 function taskRowForDash(t) {
   const tagName = (t.tags || [])[0];
   const tc = tagName ? tagColor(tagName) : (t.color || "#8fa3ad");
   const whenTxt = t.day === "someday" ? "someday" : relDay(t.day);
   const urgent = t.day !== "someday" && !t.done && dayDiff(todayStr(), t.day) <= 0;
-  return `<div class="duerow ${t.done ? "done" : ""}" data-trow="${t.id}" style="cursor:pointer">
+  const fill = S.settings.todoStyle === "fill";
+  const rowStyle = fill ? ` style="background:color-mix(in srgb,${tc} 14%,var(--card));border-color:color-mix(in srgb,${tc} 38%,var(--line))"` : "";
+  return `<div class="duerow ${t.done ? "done" : ""}" data-trow="${t.id}"${rowStyle}>
     <span class="bar" style="background:${tc}"></span>
+    ${fill ? "" : `<span class="duedot" style="background:${tc}"></span>`}
     <span class="t">${esc(t.title)}</span>
     ${tagName ? tagChip(tagName) : ""}
     <span class="when" ${urgent ? 'style="color:var(--danger)"' : ""}>${whenTxt}</span>
   </div>`;
-}
-
-/* Mini calendar showing tasks by due date (dashboard panel toggle) */
-function dashTodoCalHtml() {
-  if (!UI.homeTodoCal) { const d = new Date(); UI.homeTodoCal = [d.getFullYear(), d.getMonth()]; }
-  const [y, m] = UI.homeTodoCal;
-  const lead = (new Date(y, m, 1).getDay() + 6) % 7;
-  const dim = new Date(y, m + 1, 0).getDate();
-  const rows = Math.ceil((lead + dim) / 7);
-  const byDay = {};
-  for (const t of alive(S.tasks).filter(x => x.day !== "someday")) (byDay[t.day] = byDay[t.day] || []).push(t);
-  const today = todayStr();
-  let cells = "";
-  for (let i = 0; i < rows * 7; i++) {
-    const d = new Date(y, m, i - lead + 1);
-    const ds = fmtDate(d);
-    const inM = d.getMonth() === m;
-    const tasks = byDay[ds] || [];
-    cells += `<div class="calcell ${inM ? "" : "dim"} ${ds === today ? "today" : ""}" data-tday="${ds}">
-      <span class="dnum">${d.getDate()}</span>
-      ${tasks.slice(0, 2).map(t => {
-        const tc = (t.tags || [])[0] ? tagColor(t.tags[0]) : (t.color || "#8fa3ad");
-        return `<span class="calev ${t.done ? "struck" : ""}" style="background:${tc}">${esc(t.title)}</span>`;
-      }).join("")}
-      ${tasks.length > 2 ? `<span class="calmore">+${tasks.length - 2}</span>` : ""}
-      <span class="dotbar">${tasks.slice(0, 6).map(t => {
-        const tc = (t.tags || [])[0] ? tagColor(t.tags[0]) : (t.color || "#8fa3ad");
-        return `<span class="evdot" style="background:${tc};${t.done ? "opacity:.35" : ""}"></span>`;
-      }).join("")}</span>
-    </div>`;
-  }
-  return `
-    <div class="mc-head">
-      <span class="mc-title">${MONTHS[m]} ${y}</span>
-      <span style="display:flex;gap:5px">
-        <button class="btn small" id="mtc-prev" aria-label="previous month">‹</button>
-        <button class="btn small ghost" id="mtc-today">Today</button>
-        <button class="btn small" id="mtc-next" aria-label="next month">›</button>
-      </span>
-    </div>
-    <div class="calgrid dashcal">
-      ${["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map(d => `<span class="dow">${d}</span>`).join("")}
-      ${cells}
-    </div>`;
 }
 
 function renderHome() {
@@ -642,13 +628,12 @@ function renderHome() {
         : `<div class="empty">No routine set for ${DOW_FULL[dow]}s.</div>`}`,
     weektasks: `
       <h2>To-dos <span style="display:flex;gap:6px;align-items:center">
-        <button class="seemore" id="dash-todo-tog">${UI.dashTodoMode === "cal" ? "list view" : "calendar"}</button>
+        <button class="seemore" id="todo-style-toggle">style: ${S.settings.todoStyle === "fill" ? "filled" : "dots"}</button>
         <button class="seemore" data-go="week">all</button>
       </span></h2>
-      ${UI.dashTodoMode === "cal" ? dashTodoCalHtml()
-        : (myTasks.length
-          ? `<div class="duelist">${myTasks.map(taskRowForDash).join("")}</div>`
-          : `<div class="empty">${emptyLine(2 + parseDate(today).getDate())}</div>`)}`,
+      ${myTasks.length
+        ? `<div class="duelist">${myTasks.map(taskRowForDash).join("")}</div>`
+        : `<div class="empty">${emptyLine(2 + parseDate(today).getDate())}</div>`}`,
   };
   const wrap = id => `<div class="card panel dashpanel ${UI.arrange ? "arranging" : ""} ${lay[id].hl ? "hl-on" : ""}" data-panel="${id}"${lay[id].hl ? ` style="--hl:${lay[id].hl}"` : ""}>
     ${UI.arrange ? arrBar(lay[id].area) : ""}${panels[id]}</div>`;
@@ -688,12 +673,29 @@ function renderHome() {
       const cycle = HL_COLORS;
       cur[id].hl = cycle[(cycle.indexOf(cur[id].hl || "") + 1) % cycle.length];
     } else if (act === "up" || act === "down") {
-      const peers = DASH_PANELS.filter(p => cur[p].area === cur[id].area).sort((x, y) => cur[x].ord - cur[y].ord);
-      const i = peers.indexOf(id);
-      const j = act === "up" ? i - 1 : i + 1;
-      if (j < 0 || j >= peers.length) return;
-      [peers[i], peers[j]] = [peers[j], peers[i]];
-      peers.forEach((p, k) => cur[p].ord = k);
+      if (window.innerWidth < 680) {
+        /* mobile: single column — treat all panels as one sequence (top → left → right) */
+        const visual = ["top", "left", "right"].flatMap(a =>
+          DASH_PANELS.filter(p => cur[p].area === a).sort((x, y) => cur[x].ord - cur[y].ord)
+        );
+        const i = visual.indexOf(id);
+        const j = act === "up" ? i - 1 : i + 1;
+        if (j < 0 || j >= visual.length) return;
+        const other = visual[j];
+        const tmp = { area: cur[id].area, ord: cur[id].ord };
+        cur[id].area = cur[other].area; cur[id].ord = cur[other].ord;
+        cur[other].area = tmp.area; cur[other].ord = tmp.ord;
+        /* re-normalise ords in each area */
+        for (const a of ["top", "left", "right"])
+          DASH_PANELS.filter(p => cur[p].area === a).sort((x, y) => cur[x].ord - cur[y].ord).forEach((p, k) => cur[p].ord = k);
+      } else {
+        const peers = DASH_PANELS.filter(p => cur[p].area === cur[id].area).sort((x, y) => cur[x].ord - cur[y].ord);
+        const i = peers.indexOf(id);
+        const j = act === "up" ? i - 1 : i + 1;
+        if (j < 0 || j >= peers.length) return;
+        [peers[i], peers[j]] = [peers[j], peers[i]];
+        peers.forEach((p, k) => cur[p].ord = k);
+      }
     } else {
       if (cur[id].area === act) return;
       cur[id].area = act;
@@ -738,35 +740,15 @@ function renderHome() {
     const t = S.tasks.find(x => x.id === r.dataset.trow);
     if (t) taskEditor(t);
   });
-  /* dashboard todo panel toggle */
-  const dashTodTog = $("#dash-todo-tog");
-  if (dashTodTog) dashTodTog.onclick = () => { UI.dashTodoMode = UI.dashTodoMode === "cal" ? "list" : "cal"; renderHome(); };
-  /* todo calendar nav (shown when dashTodoMode === "cal") */
-  const mtcPrev = $("#mtc-prev"), mtcNext = $("#mtc-next"), mtcToday = $("#mtc-today");
-  if (mtcPrev) mtcPrev.onclick = () => { const [yy, mm] = UI.homeTodoCal; UI.homeTodoCal = mm === 0 ? [yy - 1, 11] : [yy, mm - 1]; renderHome(); };
-  if (mtcNext) mtcNext.onclick = () => { const [yy, mm] = UI.homeTodoCal; UI.homeTodoCal = mm === 11 ? [yy + 1, 0] : [yy, mm + 1]; renderHome(); };
-  if (mtcToday) mtcToday.onclick = () => { const d = new Date(); UI.homeTodoCal = [d.getFullYear(), d.getMonth()]; renderHome(); };
-  $$("#view-home [data-tday]").forEach(b => b.onclick = () => {
-    const day = b.dataset.tday;
-    const tasks = alive(S.tasks).filter(t => t.day === day && !t.done);
-    if (tasks.length) {
-      openModal(`<h2>${niceDate(day)}</h2>
-        <div class="duelist" style="margin-bottom:4px">${tasks.map(taskRowForDash).join("")}</div>
-        <div class="modal-actions">
-          <button class="btn ghost" id="tdm-close">Close</button>
-          <button class="btn primary" id="tdm-add">+ Add here</button>
-        </div>`);
-      $("#tdm-close").onclick = closeModal;
-      const baseDay = day;
-      $("#tdm-add").onclick = () => { closeModal(); taskEditor({ title: "", day: baseDay, color: "", tags: [], notes: "", url: "" }); };
-      $$("#modal [data-trow]").forEach(r => r.onclick = () => {
-        const tk = S.tasks.find(x => x.id === r.dataset.trow);
-        if (tk) taskEditor(tk);
-      });
-    } else {
-      taskEditor(null);
-    }
-  });
+  /* todo-style toggle on weektasks panel */
+  const todoStyleBtn = $("#todo-style-toggle");
+  if (todoStyleBtn) todoStyleBtn.onclick = () => {
+    S.settings.todoStyle = S.settings.todoStyle === "fill" ? "dot" : "fill";
+    persist(); renderHome();
+  };
+  /* dashboard calendar: to-dos toggle */
+  const dcTodotog = $("#dc-todotog");
+  if (dcTodotog) dcTodotog.onclick = () => { UI.dashCalTodos = !UI.dashCalTodos; renderHome(); };
 }
 function linkEditor(l) {
   const isNew = !l;
@@ -975,10 +957,13 @@ function courseEditor(c) {
    WEEK BOARD (Tweek-style)
    ============================================================ */
 function taskCardHtml(t) {
-  const cstyle = t.color ? ` style="border-left:4px solid ${esc(t.color)};background:color-mix(in srgb, ${esc(t.color)} 11%, var(--card-2))"` : "";
+  /* tag color takes priority over item color */
+  const tagName = (t.tags || [])[0];
+  const cardColor = tagName ? tagColor(tagName) : (t.color || "");
+  const cstyle = cardColor ? ` style="border-left:4px solid ${cardColor};background:color-mix(in srgb,${cardColor} 11%,var(--card-2))"` : "";
   return `<div class="tk ${t.done ? "done" : ""}" data-id="${t.id}" data-kind="task"${cstyle}>
     <span class="ck ${t.done ? "on" : ""}"><svg viewBox="0 0 24 24"><path d="M4 12.5 10 18.5 20 6"/></svg></span>
-    <span class="t">${esc(t.title)}</span>
+    <span class="t">${esc(t.title)}${tagName ? `<span class="sub" style="color:color-mix(in srgb,${tagColor(tagName)} 62%,var(--ink))">${esc(tagName)}</span>` : ""}</span>
   </div>`;
 }
 function mainCardHtml(a) {
@@ -1014,10 +999,16 @@ function wireWeekSeg() {
 function todoRowHtml(t) {
   const dated = t.day !== "someday";
   const dl = (dated && !t.done) ? daysLeftLabel(t.day) : null;
-  return `<div class="todo-row ${t.done ? "done" : ""}" data-tid="${t.id}">
+  const tagName = (t.tags || [])[0];
+  const rowTc = tagName ? tagColor(tagName) : (t.color || null);
+  const rowBg = rowTc ? ` style="background:color-mix(in srgb,${rowTc} 9%,var(--card))"` : "";
+  const allTagChips = (t.tags || []).map(tagChip).join("");
+  return `<div class="todo-row ${t.done ? "done" : ""}" data-tid="${t.id}"${rowBg}>
     <span class="ck ${t.done ? "on" : ""}" data-tck="${t.id}" style="width:19px;height:19px"><svg viewBox="0 0 24 24"><path d="M4 12.5 10 18.5 20 6"/></svg></span>
-    <span class="tt">${esc(t.title)}${t.url ? ` <a class="lkico" href="${esc(t.url)}" target="_blank" rel="noopener" data-stop><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1.5 1.5"/><path d="M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1.5-1.5"/></svg></a>` : ""}${t.notes ? ` <span class="desc-dot">— ${esc(t.notes.length > 56 ? t.notes.slice(0, 56) + "…" : t.notes)}</span>` : ""}</span>
-    <span class="tags">${(t.tags || []).map(tagChip).join("")}</span>
+    <span class="tt">
+      <span class="tt-text">${esc(t.title)}${t.url ? ` <a class="lkico" href="${esc(t.url)}" target="_blank" rel="noopener" data-stop><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1.5 1.5"/><path d="M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1.5-1.5"/></svg></a>` : ""}${t.notes ? ` <span class="desc-dot">— ${esc(t.notes.length > 56 ? t.notes.slice(0, 56) + "…" : t.notes)}</span>` : ""}</span>
+      ${allTagChips ? `<span class="tt-tags">${allTagChips}</span>` : ""}
+    </span>
     <span class="due-d">${dated ? niceDate(t.day) : "someday"}</span>
     <span class="left-d ${dl ? dl.cls : ""}">${dl ? dl.txt : (t.done ? "done" : "—")}</span>
   </div>`;
@@ -1038,7 +1029,7 @@ function renderTodoList() {
     </div>
     <div class="card panel">
       <div class="todo-table">
-        <div class="todo-head"><span></span><span>To-do</span><span style="text-align:right">Tags</span><span style="text-align:right">Due</span><span style="text-align:right">Days left</span></div>
+        <div class="todo-head"><span></span><span>To-do</span><span style="text-align:right">Due</span><span style="text-align:right">Days left</span></div>
         ${open.length ? open.map(todoRowHtml).join("") : `<div class="empty" style="margin:12px 4px">${emptyLine(4)}</div>`}
         <div class="todo-new" id="td-new"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg> New to-do</div>
       </div>
@@ -1668,7 +1659,7 @@ function renderCalTable() {
         <button class="btn small" id="cm-next">›</button>
       </div>
     </div>
-    <div class="card panel"><div class="todo-table">
+    <div class="card panel"><div class="todo-table asg-table">
       <div class="todo-head"><span></span><span>Assignment</span><span style="text-align:right">Course · type</span><span style="text-align:right">Due</span><span style="text-align:right">Days left</span></div>
       ${list.length ? list.map(a => {
         const done = a.status === "Done";
@@ -1807,7 +1798,7 @@ function renderCalTodos() {
   $("#cal-body").innerHTML = `
     <div class="card panel">
       <div class="todo-table">
-        <div class="todo-head"><span></span><span>To-do</span><span style="text-align:right">Tags</span><span style="text-align:right">Due</span><span style="text-align:right">Days left</span></div>
+        <div class="todo-head"><span></span><span>To-do</span><span style="text-align:right">Due</span><span style="text-align:right">Days left</span></div>
         ${open.length ? open.map(todoRowHtml).join("") : `<div class="empty" style="margin:12px 4px">No open to-dos. A rare gift.</div>`}
         <div class="todo-new" id="cal-td-new"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg> New to-do</div>
       </div>
