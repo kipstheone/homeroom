@@ -2,7 +2,7 @@
 /* ============================================================
    ODO — app logic
    ============================================================ */
-const APP_VERSION = "v0.17";
+const APP_VERSION = "v0.18";
 
 /* ---------- tiny helpers ---------- */
 const $ = s => document.querySelector(s);
@@ -2116,7 +2116,7 @@ function renderSettings() {
         <input type="file" id="st-file" accept=".json" style="display:none">
       </div>
     </div>
-    <div class="hint" style="text-align:center;padding:4px 0 20px">ODO ${APP_VERSION} · One Day, or Day One<br>
+    <div class="hint" id="ver-line" style="text-align:center;padding:4px 0 20px;cursor:pointer">ODO ${APP_VERSION} · One Day, or Day One<br>
       <span style="font-size:10px;opacity:.7">${(() => {
         const vv = window.visualViewport;
         const tb = $("#tabbar");
@@ -2134,6 +2134,7 @@ function renderSettings() {
     s.look = b.dataset.l; persist(); applyTheme(); renderSettings();
   });
   $("#st-name").onchange = e => { s.userName = e.target.value.trim().slice(0, 30); persist(); toast(s.userName ? "Hi, " + s.userName : "Name cleared"); };
+  $("#ver-line").onclick = () => { toggleDebug(); toast(localStorage.getItem("odo_debug") === "1" ? "Debug overlay on" : "Debug overlay off"); };
   $("#st-banner").onclick = () => $("#st-banner-file").click();
   if (s.banner) $("#st-banner-rm").onclick = () => { s.banner = ""; persist(); renderSettings(); toast("Banner removed"); };
   $("#st-banner-file").onchange = e => {
@@ -2221,7 +2222,8 @@ function fixViewportHeight() {
   const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
   const standalone = navigator.standalone === true || matchMedia("(display-mode: standalone)").matches;
   const set = () => {
-    /* with input auto-zoom banned (maximum-scale=1 + 16px inputs), innerHeight is honest */
+    /* never resize the shell while the keyboard is up — it causes layout jumps */
+    if (keyboardOpen()) return;
     document.documentElement.style.setProperty("--vh", window.innerHeight + "px");
   };
   void isIOS; void standalone;
@@ -2244,7 +2246,20 @@ function visibleBottom() {
   const vv = window.visualViewport;
   return vv ? vv.offsetTop + vv.height : window.innerHeight;
 }
+function keyboardOpen() {
+  const ae = document.activeElement;
+  if (ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName)) return true;
+  const vv = window.visualViewport;
+  return !!(vv && window.innerHeight - vv.height > 100);
+}
 function edgePinApply() {
+  /* while the keyboard is up, iOS owns the layout — pinning now causes the UI
+     to strobe/jump. Stand down; we re-pin the moment the keyboard closes. */
+  if (keyboardOpen()) {
+    const m = $("#modal");
+    if (m && m.style.transform) m.style.transform = "";
+    return;
+  }
   const vb = visibleBottom();
   const tb = $("#tabbar");
   let delta = 0;
@@ -2268,6 +2283,39 @@ function edgePinApply() {
     if (Math.abs(md) > 1) m.style.transform = `translateY(${md}px)`;
   }
 }
+/* live debug overlay — tap the version line in Settings to toggle.
+   Shows in screenshots/recordings so glitches can be diagnosed remotely. */
+let dbgTimer = null;
+function toggleDebug(force) {
+  const on = force !== undefined ? force : localStorage.getItem("odo_debug") !== "1";
+  localStorage.setItem("odo_debug", on ? "1" : "0");
+  let el = $("#dbg");
+  if (!on) {
+    if (el) el.remove();
+    clearInterval(dbgTimer);
+    dbgTimer = null;
+    return;
+  }
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "dbg";
+    el.style.cssText = "position:fixed;top:4px;left:4px;z-index:999;background:rgba(0,0,0,.72);color:#7CFC00;font:10px/1.5 ui-monospace,monospace;padding:4px 7px;border-radius:7px;pointer-events:none;white-space:pre";
+    document.body.appendChild(el);
+  }
+  const upd = () => {
+    const vv = window.visualViewport;
+    const tb = $("#tabbar");
+    const m = $("#modal-veil").classList.contains("open") ? $("#modal") : null;
+    el.textContent =
+      `ODO ${APP_VERSION}  ih:${window.innerHeight}  scr:${screen.height}\n` +
+      `vv:${vv ? Math.round(vv.height) + "+" + Math.round(vv.offsetTop) + " s" + (vv.scale || 1).toFixed(2) : "–"}  icb:${document.documentElement.clientHeight}\n` +
+      `kb:${keyboardOpen() ? "OPEN" : "closed"}  ae:${document.activeElement ? document.activeElement.tagName : "–"}\n` +
+      `bar:${tb ? Math.round(tb.getBoundingClientRect().bottom) : "–"}  tf:${tb && tb.style.transform ? tb.style.transform.replace("translateY(", "").replace(")", "") : "0"}` +
+      (m ? `\nmodal:${Math.round(m.getBoundingClientRect().bottom)} tf:${m.style.transform || "0"}` : "");
+  };
+  upd();
+  dbgTimer = setInterval(upd, 250);
+}
 function startEdgePin() {
   edgePinApply();
   setInterval(edgePinApply, 400);
@@ -2276,6 +2324,8 @@ function startEdgePin() {
   window.visualViewport?.addEventListener("scroll", edgePinApply);
   addEventListener("orientationchange", () => { setTimeout(edgePinApply, 150); setTimeout(edgePinApply, 500); });
   addEventListener("pageshow", edgePinApply);
+  /* when an input loses focus (keyboard closing), re-pin after the close animation */
+  document.addEventListener("focusout", () => { setTimeout(edgePinApply, 350); setTimeout(edgePinApply, 700); });
 }
 function initPullToRefresh() {
   const main = $("#main");
@@ -2306,6 +2356,7 @@ function init() {
   applyTheme();
   fixViewportHeight();
   startEdgePin();
+  if (localStorage.getItem("odo_debug") === "1") toggleDebug(true);
   initPullToRefresh();
   $("#themebtn").onclick = () => {
     const dark = document.documentElement.dataset.theme === "dark";
