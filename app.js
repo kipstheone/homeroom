@@ -2,7 +2,7 @@
 /* ============================================================
    ODO — app logic
    ============================================================ */
-const APP_VERSION = "v0.18";
+const APP_VERSION = "v0.19";
 
 /* ---------- tiny helpers ---------- */
 const $ = s => document.querySelector(s);
@@ -45,6 +45,9 @@ const TYPE_COLOR_DEFAULTS = {
   Paper: "#b96fcd", Reading: "#5fb36a", Lab: "#45b6a1", Personal: "#e272b2", Other: "#8fa3ad",
 };
 const typeColor = t => (S.typeColors && S.typeColors[t]) || TYPE_COLOR_DEFAULTS[t] || TYPE_COLOR_DEFAULTS.Other;
+const allTypes = () => [...TYPES, ...(S.customTypes || []).map(x => x.name)];
+const isPersonalType = t => t === "Personal" || !!(S.customTypes || []).find(x => x.name === t && x.personal);
+const dueTodayTxt = t => isPersonalType(t) ? "today" : "due today";
 const STATUSES = ["Not started", "In progress", "Done"];
 const COLORS = [
   "#e2654f", "#ec8c4e", "#d9a43c", "#9ab544",
@@ -90,6 +93,8 @@ const DEFAULTS = {
   tagsMeta: {},      // {tagName: lastModifiedTs}
   typeColors: {},    // {assignmentType: colorHex} overrides
   typeColorsU: 0,    // last modified ts for typeColors
+  customTypes: [],   // [{name, personal:bool}] user-made categories
+  customTypesU: 0,   // last modified ts for customTypes
   __m2: true,        // look-migration flag
   links: [            // {id,title,url,color,updatedAt,deleted}
     { id: "lk-gmail", title: "Gmail", url: "https://mail.google.com", color: "#b6543c", updatedAt: 1, deleted: false },
@@ -211,7 +216,7 @@ function render() {
 /* ---------- shared option builders ---------- */
 const courseOptions = sel => `<option value="">No course</option>` +
   alive(S.courses).map(c => `<option value="${c.id}" ${c.id === sel ? "selected" : ""}>${esc(c.code ? c.code + " — " + c.name : c.name)}</option>`).join("");
-const typeOptions = sel => TYPES.map(t => `<option ${t === sel ? "selected" : ""}>${t}</option>`).join("");
+const typeOptions = sel => allTypes().map(t => `<option ${t === sel ? "selected" : ""}>${esc(t)}</option>`).join("");
 const statusOptions = sel => STATUSES.map(t => `<option ${t === sel ? "selected" : ""}>${t}</option>`).join("");
 const typeChipClass = t => ({ Test: "c-accent", Quiz: "c-gold", Project: "c-plum", Paper: "c-plum", Homework: "c-blue", Reading: "c-green", Lab: "c-green" }[t] || "c-faint");
 const TYPE_GLYPHS = {
@@ -231,26 +236,73 @@ const typeChip = (t, sz = 9) => {
   return `<span class="chip" style="background:color-mix(in srgb, ${c} 18%, var(--card));color:color-mix(in srgb, ${c} 62%, var(--ink))">${typeGlyph(t, sz)}${esc(t)}</span>`;
 };
 function typeColorEditor() {
+  const all = allTypes();
+  let newKind = "school";
   openModal(`
-    <h2>Assignment colors</h2>
-    <p class="hint" style="margin:-8px 0 14px">One color per category, used everywhere — calendar dots, the week board, Coming up.</p>
-    ${TYPES.map((t, i) => `
-      <div class="field">
-        <label style="text-transform:none;letter-spacing:0">${typeChip(t, 10)}</label>
+    <h2>Assignment categories</h2>
+    <p class="hint" style="margin:-8px 0 14px">Recolor any category — used everywhere. Add your own below: school/work ones say "due today", personal ones just "today".</p>
+    ${all.map((t, i) => {
+      const custom = (S.customTypes || []).find(x => x.name === t);
+      const kindLabel = custom ? (custom.personal ? "personal" : "school/work") : (t === "Personal" ? "personal · built-in" : "built-in");
+      return `<div class="field">
+        <label style="text-transform:none;letter-spacing:0;display:flex;align-items:center;justify-content:space-between;gap:8px">
+          <span style="display:flex;align-items:center;gap:8px">${typeChip(t, 10)}<span class="hint" style="font-weight:400">${kindLabel}</span></span>
+          ${custom ? `<button class="iconbtn" data-typedel="${esc(t)}" aria-label="remove category"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button>` : ""}
+        </label>
         ${colorPickRow("tyc-" + i, typeColor(t))}
-      </div>`).join("")}
+      </div>`;
+    }).join("")}
+    <div class="field" style="border-top:1.5px solid var(--line);padding-top:15px;margin-top:4px"><label>New category</label>
+      <input id="tyc-name" placeholder="e.g. Club, Essay draft, Chores" autocomplete="off" style="margin-bottom:9px">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <div class="seg" id="tyc-kind">
+          <button data-k="school" class="active">School/work</button>
+          <button data-k="personal">Personal</button>
+        </div>
+        <button class="btn small primary" id="tyc-add">Add category</button>
+      </div>
+    </div>
     <div class="modal-actions">
-      <button class="btn ghost" id="tyc-reset">Reset defaults</button>
+      <button class="btn ghost" id="tyc-reset">Reset colors</button>
       <span class="spacer"></span>
       <button class="btn primary" id="tyc-done">Done</button>
     </div>`);
-  TYPES.forEach((t, i) => wireColorPick("tyc-" + i, c => {
+  all.forEach((t, i) => wireColorPick("tyc-" + i, c => {
     if (!c) return;
     S.typeColors[t] = c;
     S.typeColorsU = Date.now();
     save();
     typeColorEditor();
   }));
+  $$("#tyc-kind button").forEach(b => b.onclick = () => {
+    newKind = b.dataset.k;
+    $$("#tyc-kind button").forEach(x => x.classList.toggle("active", x === b));
+  });
+  $("#tyc-add").onclick = () => {
+    const name = $("#tyc-name").value.trim().slice(0, 20);
+    if (!name) { toast("Name the category first"); return; }
+    if (allTypes().some(t => t.toLowerCase() === name.toLowerCase())) { toast("That category already exists"); return; }
+    S.customTypes.push({ name, personal: newKind === "personal" });
+    S.customTypesU = Date.now();
+    if (!S.typeColors[name]) {
+      S.typeColors[name] = COLORS[(allTypes().length + 2) % COLORS.length];
+      S.typeColorsU = Date.now();
+    }
+    save();
+    typeColorEditor();
+    toast(`"${name}" added`);
+  };
+  $$("#modal [data-typedel]").forEach(b => b.onclick = () => {
+    const name = b.dataset.typedel;
+    confirmBox("Remove category?", `"${name}" disappears from the pickers. Existing assignments keep their label but lose the color.`, "Remove", () => {
+      S.customTypes = S.customTypes.filter(x => x.name !== name);
+      S.customTypesU = Date.now();
+      delete S.typeColors[name];
+      S.typeColorsU = Date.now();
+      save();
+      typeColorEditor();
+    }, true);
+  });
   $("#tyc-reset").onclick = () => { S.typeColors = {}; S.typeColorsU = Date.now(); save(); typeColorEditor(); };
   $("#tyc-done").onclick = () => { closeModal(); render(); };
 }
@@ -406,7 +458,7 @@ function greeting() {
 function dueRowHtml(a) {
   const dd = dayDiff(todayStr(), a.due);
   const urgent = a.status !== "Done" && dd <= 0;
-  const whenTxt = (a.status !== "Done" && dd === 0) ? "due today" : relDay(a.due);
+  const whenTxt = (a.status !== "Done" && dd === 0) ? dueTodayTxt(a.type) : relDay(a.due);
   const tc = typeColor(a.type);
   const fill = S.settings.dueStyle === "fill";
   const rowStyle = fill ? ` style="background:color-mix(in srgb, ${tc} 14%, var(--card));border-color:color-mix(in srgb, ${tc} 38%, var(--line))"` : "";
@@ -513,7 +565,7 @@ function renderHome() {
     coming: `
       <h2>Coming up <button class="seemore" id="due-style-toggle">style: ${S.settings.dueStyle === "fill" ? "filled" : "dots"}</button></h2>
       <div class="dash-tabs">
-        <button data-dtab="tomorrow" class="${UI.dashTab === "tomorrow" ? "active" : ""}">Due by tomorrow</button>
+        <button data-dtab="tomorrow" class="${UI.dashTab === "tomorrow" ? "active" : ""}">By tomorrow</button>
         <button data-dtab="week" class="${UI.dashTab === "week" ? "active" : ""}">Next 7 days</button>
         <button data-dtab="tests" class="${UI.dashTab === "tests" ? "active" : ""}">Tests · ${lookahead}d</button>
       </div>
@@ -1472,7 +1524,7 @@ function renderCalTable() {
       <div class="todo-head"><span></span><span>Assignment</span><span style="text-align:right">Course · type</span><span style="text-align:right">Due</span><span style="text-align:right">Days left</span></div>
       ${list.length ? list.map(a => {
         const done = a.status === "Done";
-        const dl = done ? null : daysLeftLabel(a.due, "due today");
+        const dl = done ? null : daysLeftLabel(a.due, dueTodayTxt(a.type));
         const tc = typeColor(a.type);
         return `<div class="todo-row ${done ? "done" : ""}" data-asg="${a.id}" style="background:color-mix(in srgb, ${tc} 10%, var(--card))">
           <span class="ck ${done ? "on" : ""}" data-ack="${a.id}" style="width:19px;height:19px"><svg viewBox="0 0 24 24"><path d="M4 12.5 10 18.5 20 6"/></svg></span>
@@ -1574,7 +1626,7 @@ function renderCalList() {
       </select>
       <select id="fl-type">
         <option value="all">All types</option>
-        ${TYPES.map(t => `<option ${UI.asgType === t ? "selected" : ""}>${t}</option>`).join("")}
+        ${allTypes().map(t => `<option ${UI.asgType === t ? "selected" : ""}>${esc(t)}</option>`).join("")}
       </select>
       <button class="btn small ${UI.asgHideDone ? "primary" : ""}" id="fl-done">${UI.asgHideDone ? "Showing open only" : "Hide done"}</button>
     </div>
@@ -1893,6 +1945,7 @@ function sharedState() {
     courses: S.courses, assignments: S.assignments, tasks: S.tasks,
     routines: S.routines, links: S.links, tags: S.tags, tagsMeta: S.tagsMeta,
     typeColors: S.typeColors, typeColorsU: S.typeColorsU,
+    customTypes: S.customTypes, customTypesU: S.customTypesU,
     routineChecks: S.routineChecks, routineCheckMeta: S.routineCheckMeta,
   };
 }
@@ -1927,6 +1980,11 @@ function mergeRemote(remote) {
   if ((remote.typeColorsU || 0) > (S.typeColorsU || 0)) {
     S.typeColors = remote.typeColors || {};
     S.typeColorsU = remote.typeColorsU;
+    changed = true;
+  }
+  if ((remote.customTypesU || 0) > (S.customTypesU || 0)) {
+    S.customTypes = remote.customTypes || [];
+    S.customTypesU = remote.customTypesU;
     changed = true;
   }
   return changed;
@@ -2075,8 +2133,8 @@ function renderSettings() {
 
     <div class="card set-section">
       <h2>Planner</h2>
-      <div class="set-inline"><span>Assignment category colors</span>
-        <button class="btn small" id="st-typecolors">Edit colors</button>
+      <div class="set-inline"><span>Assignment categories</span>
+        <button class="btn small" id="st-typecolors">Manage categories</button>
       </div>
       <div class="set-inline"><span>Show upcoming tests within</span>
         <select id="st-ahead" style="border:1.5px solid var(--line-strong);background:var(--card);color:var(--ink);border-radius:9px;padding:6px 10px;font-weight:700">
