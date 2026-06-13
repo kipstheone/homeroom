@@ -2,7 +2,7 @@
 /* ============================================================
    ODO — app logic
    ============================================================ */
-const APP_VERSION = "v0.19";
+const APP_VERSION = "v1.0.0";
 
 /* ---------- tiny helpers ---------- */
 const $ = s => document.querySelector(s);
@@ -135,7 +135,8 @@ const UI = {
   view: "home", dashTab: "tomorrow", boardOffset: 0,
   routineDate: todayStr(), calMonth: null, calMode: "month",
   asgCourse: "all", asgType: "all", asgHideDone: false,
-  homeCal: null, linkEdit: false, arrange: false, weekMode: "list",
+  homeCal: null, homeTodoCal: null, dashTodoMode: "list",
+  linkEdit: false, arrange: false, weekMode: "list",
 };
 
 /* ---------- theme ---------- */
@@ -519,17 +520,76 @@ function dashLayout() {
   return out;
 }
 function arrBar(area) {
+  const isMobile = window.innerWidth < 680;
   return `<div class="arrbar">
     <button data-arr="up" title="move up">↑</button>
     <button data-arr="down" title="move down">↓</button>
-    <span class="arrsep"></span>
+    ${isMobile ? "" : `<span class="arrsep"></span>
     <button data-arr="left" class="${area === "left" ? "on" : ""}" title="left column">L</button>
     <button data-arr="top" class="${area === "top" ? "on" : ""}" title="full width">W</button>
-    <button data-arr="right" class="${area === "right" ? "on" : ""}" title="right column">R</button>
+    <button data-arr="right" class="${area === "right" ? "on" : ""}" title="right column">R</button>`}
     <span class="arrsep"></span>
     <button data-arr="hl" title="header color">Color</button>
   </div>`;
 }
+/* Render a task row styled like a Coming-up duerow (tag color bar, no checkbox) */
+function taskRowForDash(t) {
+  const tagName = (t.tags || [])[0];
+  const tc = tagName ? tagColor(tagName) : (t.color || "#8fa3ad");
+  const whenTxt = t.day === "someday" ? "someday" : relDay(t.day);
+  const urgent = t.day !== "someday" && !t.done && dayDiff(todayStr(), t.day) <= 0;
+  return `<div class="duerow ${t.done ? "done" : ""}" data-trow="${t.id}" style="cursor:pointer">
+    <span class="bar" style="background:${tc}"></span>
+    <span class="t">${esc(t.title)}</span>
+    ${tagName ? tagChip(tagName) : ""}
+    <span class="when" ${urgent ? 'style="color:var(--danger)"' : ""}>${whenTxt}</span>
+  </div>`;
+}
+
+/* Mini calendar showing tasks by due date (dashboard panel toggle) */
+function dashTodoCalHtml() {
+  if (!UI.homeTodoCal) { const d = new Date(); UI.homeTodoCal = [d.getFullYear(), d.getMonth()]; }
+  const [y, m] = UI.homeTodoCal;
+  const lead = (new Date(y, m, 1).getDay() + 6) % 7;
+  const dim = new Date(y, m + 1, 0).getDate();
+  const rows = Math.ceil((lead + dim) / 7);
+  const byDay = {};
+  for (const t of alive(S.tasks).filter(x => x.day !== "someday")) (byDay[t.day] = byDay[t.day] || []).push(t);
+  const today = todayStr();
+  let cells = "";
+  for (let i = 0; i < rows * 7; i++) {
+    const d = new Date(y, m, i - lead + 1);
+    const ds = fmtDate(d);
+    const inM = d.getMonth() === m;
+    const tasks = byDay[ds] || [];
+    cells += `<div class="calcell ${inM ? "" : "dim"} ${ds === today ? "today" : ""}" data-tday="${ds}">
+      <span class="dnum">${d.getDate()}</span>
+      ${tasks.slice(0, 2).map(t => {
+        const tc = (t.tags || [])[0] ? tagColor(t.tags[0]) : (t.color || "#8fa3ad");
+        return `<span class="calev ${t.done ? "struck" : ""}" style="background:${tc}">${esc(t.title)}</span>`;
+      }).join("")}
+      ${tasks.length > 2 ? `<span class="calmore">+${tasks.length - 2}</span>` : ""}
+      <span class="dotbar">${tasks.slice(0, 6).map(t => {
+        const tc = (t.tags || [])[0] ? tagColor(t.tags[0]) : (t.color || "#8fa3ad");
+        return `<span class="evdot" style="background:${tc};${t.done ? "opacity:.35" : ""}"></span>`;
+      }).join("")}</span>
+    </div>`;
+  }
+  return `
+    <div class="mc-head">
+      <span class="mc-title">${MONTHS[m]} ${y}</span>
+      <span style="display:flex;gap:5px">
+        <button class="btn small" id="mtc-prev" aria-label="previous month">‹</button>
+        <button class="btn small ghost" id="mtc-today">Today</button>
+        <button class="btn small" id="mtc-next" aria-label="next month">›</button>
+      </span>
+    </div>
+    <div class="calgrid dashcal">
+      ${["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map(d => `<span class="dow">${d}</span>`).join("")}
+      ${cells}
+    </div>`;
+}
+
 function renderHome() {
   const g = greeting();
   const today = todayStr();
@@ -563,7 +623,7 @@ function renderHome() {
       </div>`,
     calendar: dashCalHtml(),
     coming: `
-      <h2>Coming up <button class="seemore" id="due-style-toggle">style: ${S.settings.dueStyle === "fill" ? "filled" : "dots"}</button></h2>
+      <h2>Coming up deadlines <button class="seemore" id="due-style-toggle">style: ${S.settings.dueStyle === "fill" ? "filled" : "dots"}</button></h2>
       <div class="dash-tabs">
         <button data-dtab="tomorrow" class="${UI.dashTab === "tomorrow" ? "active" : ""}">By tomorrow</button>
         <button data-dtab="week" class="${UI.dashTab === "week" ? "active" : ""}">Next 7 days</button>
@@ -581,17 +641,14 @@ function renderHome() {
       ${hasDaily ? schedHtml(today, "data-hrck", true)
         : `<div class="empty">No routine set for ${DOW_FULL[dow]}s.</div>`}`,
     weektasks: `
-      <h2>To-dos <button class="seemore" data-go="week">all</button></h2>
-      ${myTasks.length ? `<div>${myTasks.map(t => {
-        const dl = (t.day !== "someday") ? daysLeftLabel(t.day) : null;
-        return `<div class="mini-todo ${t.done ? "done" : ""}">
-          <span class="ck ${t.done ? "on" : ""}" data-tck="${t.id}" style="width:18px;height:18px"><svg viewBox="0 0 24 24"><path d="M4 12.5 10 18.5 20 6"/></svg></span>
-          <span class="tt" data-tedit="${t.id}"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.title)}</span>${(t.tags || []).slice(0, 2).map(tagChip).join("")}</span>
-          <span style="font-size:12px;color:var(--ink-soft);font-weight:600;white-space:nowrap">${t.day === "someday" ? "someday" : relDay(t.day)}</span>
-          <span class="left-d ${dl ? dl.cls : ""}" style="font-size:11px;font-weight:800;min-width:54px;text-align:right">${dl ? dl.txt : ""}</span>
-        </div>`;
-      }).join("")}</div>`
-        : `<div class="empty">${emptyLine(2 + parseDate(today).getDate())}</div>`}`,
+      <h2>To-dos <span style="display:flex;gap:6px;align-items:center">
+        <button class="seemore" id="dash-todo-tog">${UI.dashTodoMode === "cal" ? "list view" : "calendar"}</button>
+        <button class="seemore" data-go="week">all</button>
+      </span></h2>
+      ${UI.dashTodoMode === "cal" ? dashTodoCalHtml()
+        : (myTasks.length
+          ? `<div class="duelist">${myTasks.map(taskRowForDash).join("")}</div>`
+          : `<div class="empty">${emptyLine(2 + parseDate(today).getDate())}</div>`)}`,
   };
   const wrap = id => `<div class="card panel dashpanel ${UI.arrange ? "arranging" : ""} ${lay[id].hl ? "hl-on" : ""}" data-panel="${id}"${lay[id].hl ? ` style="--hl:${lay[id].hl}"` : ""}>
     ${UI.arrange ? arrBar(lay[id].area) : ""}${panels[id]}</div>`;
@@ -676,11 +733,39 @@ function renderHome() {
     toggleRoutCheck(today, row.dataset.sched);
     renderHome();
   });
-  /* to-dos on home */
-  $$("#view-home [data-tck]").forEach(ck => ck.onclick = e => { e.stopPropagation(); toggleTaskDone(ck.dataset.tck); });
-  $$("#view-home [data-tedit]").forEach(el => el.onclick = () => {
-    const t = S.tasks.find(x => x.id === el.dataset.tedit);
+  /* to-dos on home — rows open editor on click */
+  $$("#view-home [data-trow]").forEach(r => r.onclick = () => {
+    const t = S.tasks.find(x => x.id === r.dataset.trow);
     if (t) taskEditor(t);
+  });
+  /* dashboard todo panel toggle */
+  const dashTodTog = $("#dash-todo-tog");
+  if (dashTodTog) dashTodTog.onclick = () => { UI.dashTodoMode = UI.dashTodoMode === "cal" ? "list" : "cal"; renderHome(); };
+  /* todo calendar nav (shown when dashTodoMode === "cal") */
+  const mtcPrev = $("#mtc-prev"), mtcNext = $("#mtc-next"), mtcToday = $("#mtc-today");
+  if (mtcPrev) mtcPrev.onclick = () => { const [yy, mm] = UI.homeTodoCal; UI.homeTodoCal = mm === 0 ? [yy - 1, 11] : [yy, mm - 1]; renderHome(); };
+  if (mtcNext) mtcNext.onclick = () => { const [yy, mm] = UI.homeTodoCal; UI.homeTodoCal = mm === 11 ? [yy + 1, 0] : [yy, mm + 1]; renderHome(); };
+  if (mtcToday) mtcToday.onclick = () => { const d = new Date(); UI.homeTodoCal = [d.getFullYear(), d.getMonth()]; renderHome(); };
+  $$("#view-home [data-tday]").forEach(b => b.onclick = () => {
+    const day = b.dataset.tday;
+    const tasks = alive(S.tasks).filter(t => t.day === day && !t.done);
+    if (tasks.length) {
+      openModal(`<h2>${niceDate(day)}</h2>
+        <div class="duelist" style="margin-bottom:4px">${tasks.map(taskRowForDash).join("")}</div>
+        <div class="modal-actions">
+          <button class="btn ghost" id="tdm-close">Close</button>
+          <button class="btn primary" id="tdm-add">+ Add here</button>
+        </div>`);
+      $("#tdm-close").onclick = closeModal;
+      const baseDay = day;
+      $("#tdm-add").onclick = () => { closeModal(); taskEditor({ title: "", day: baseDay, color: "", tags: [], notes: "", url: "" }); };
+      $$("#modal [data-trow]").forEach(r => r.onclick = () => {
+        const tk = S.tasks.find(x => x.id === r.dataset.trow);
+        if (tk) taskEditor(tk);
+      });
+    } else {
+      taskEditor(null);
+    }
   });
 }
 function linkEditor(l) {
@@ -1052,29 +1137,90 @@ function taskEditor(t) {
   const isNew = !t;
   const base = t || { title: "", day: todayStr(), color: "", tags: [], notes: "", url: "" };
   let picked = base.color || "";
-  const allTags = Object.keys(S.tags);
+  let selectedTags = [...(base.tags || [])];
+  let newTagColor = "";
+  /* mutable so the user can add a tag mid-session without re-opening */
+  const knownTags = Object.keys(S.tags).sort();
+
+  const buildTagPickHtml = () => {
+    if (!knownTags.length) return `<span class="hint" style="font-size:13px">No tags yet — create one below.</span>`;
+    return knownTags.map(n => {
+      const c = tagColor(n);
+      const sel = selectedTags.includes(n);
+      return `<button type="button" data-tagpick="${esc(n)}" class="tagchip" style="background:color-mix(in srgb,${c} ${sel ? "40%" : "18%"},var(--card));color:color-mix(in srgb,${c} 70%,var(--ink));outline:${sel ? "2.5px solid " + c : "none"};outline-offset:2px;cursor:pointer">${esc(n)}</button>`;
+    }).join("");
+  };
+
   openModal(`
     <h2>${isNew ? "New to-do" : "Edit to-do"}</h2>
-    <div class="field"><label>To-do</label><input id="te-title" value="${esc(base.title)}" placeholder="e.g. Email advisor about overrides"></div>
-    <div class="fieldrow">
-      <div class="field"><label>Due / day</label>
-        <div style="display:flex;gap:8px;align-items:stretch">
-          <input id="te-day" type="date" value="${base.day === "someday" ? "" : esc(base.day)}" style="flex:1">
-          <button class="btn small ${base.day === "someday" ? "primary" : "ghost"}" id="te-someday" type="button">Someday</button>
-        </div>
-        <span class="hint">Empty date = Someday.</span></div>
-      <div class="field"><label>Tags</label><input id="te-tags" value="${esc((base.tags || []).join(", "))}" placeholder="research, admin" list="te-taglist" autocomplete="off"><datalist id="te-taglist">${allTags.map(n => `<option value="${esc(n)}">`).join("")}</datalist><span class="hint">Comma-separated. New names become new tags.</span></div>
+    <div class="field"><label>To-do</label><input id="te-title" value="${esc(base.title)}" placeholder="e.g. Email advisor about overrides" autocomplete="off"></div>
+    <div class="field"><label>Due / day</label>
+      <div style="display:flex;gap:8px;align-items:stretch">
+        <input id="te-day" type="date" value="${base.day === "someday" ? "" : esc(base.day)}" style="flex:1">
+        <button class="btn small ${base.day === "someday" ? "primary" : "ghost"}" id="te-someday" type="button">Someday</button>
+      </div>
+      <span class="hint">Empty date = Someday.</span>
+    </div>
+    <div class="field">
+      <label style="display:flex;align-items:center;justify-content:space-between;gap:8px">Tags<button type="button" class="btn small ghost" id="te-newtag-btn">+ New tag</button></label>
+      <div id="te-tagpick" style="display:flex;flex-wrap:wrap;gap:7px;padding:5px 0 2px">${buildTagPickHtml()}</div>
+      <div id="te-newtag-form" style="display:none;background:var(--bg-soft);border-radius:10px;padding:12px 13px;margin-top:9px">
+        <div class="field" style="margin-bottom:9px"><label>Tag name</label><input id="te-newtag-name" placeholder="e.g. research, admin" autocomplete="off"></div>
+        <div style="margin-bottom:9px">${colorPickRow("te-newtag-colors", "")}</div>
+        <button type="button" class="btn small primary" id="te-newtag-add">Create tag</button>
+      </div>
+    </div>
+    <div class="field" id="te-color-field"${selectedTags.length ? ' style="display:none"' : ""}>
+      <label>Item color <span class="hint" style="text-transform:none;font-weight:400">— only without a tag</span></label>
+      ${colorPickRow("te-colors", picked)}
     </div>
     <div class="field"><label>Description</label><textarea id="te-notes" placeholder="optional details…">${esc(base.notes || "")}</textarea></div>
     <div class="field"><label>Link</label><input id="te-url" value="${esc(base.url || "")}" placeholder="https://… (optional)" inputmode="url" autocomplete="off"></div>
-    <div class="field"><label>Color (week board)</label>${colorPickRow("te-colors", picked)}</div>
     <div class="modal-actions">
       ${isNew ? "" : `<button class="btn ghost danger" id="te-del">Delete</button>`}
       <span class="spacer"></span>
       <button class="btn ghost" id="te-cancel">Cancel</button>
       <button class="btn primary" id="te-save">${isNew ? "Add to-do" : "Save"}</button>
     </div>`);
-  wireColorPick("te-colors", c => picked = c);
+
+  const refreshTagPick = () => {
+    const container = $("#te-tagpick");
+    if (container) container.innerHTML = buildTagPickHtml();
+    const cf = $("#te-color-field");
+    if (cf) cf.style.display = selectedTags.length ? "none" : "";
+    $$("#te-tagpick [data-tagpick]").forEach(b => b.onclick = () => {
+      const name = b.dataset.tagpick;
+      if (selectedTags.includes(name)) selectedTags = selectedTags.filter(x => x !== name);
+      else selectedTags.push(name);
+      refreshTagPick();
+    });
+  };
+  refreshTagPick();
+
+  wireColorPick("te-colors", c => { picked = c; });
+  wireColorPick("te-newtag-colors", c => { newTagColor = c; });
+
+  $("#te-newtag-btn").onclick = () => {
+    const f = $("#te-newtag-form");
+    f.style.display = f.style.display === "none" ? "" : "none";
+    if (f.style.display !== "none") setTimeout(() => { $("#te-newtag-name")?.focus(); }, 50);
+  };
+  $("#te-newtag-add").onclick = () => {
+    const name = ($("#te-newtag-name")?.value || "").trim().slice(0, 20);
+    if (!name) { toast("Name the tag first"); return; }
+    if (S.tags[name] !== undefined) { toast("That tag already exists"); return; }
+    const color = newTagColor || TAG_COLORS[Object.keys(S.tags).length % TAG_COLORS.length];
+    S.tags[name] = color; S.tagsMeta[name] = Date.now();
+    knownTags.push(name); knownTags.sort();
+    selectedTags.push(name);
+    newTagColor = "";
+    save();
+    const f = $("#te-newtag-form");
+    if (f) { f.style.display = "none"; const ni = $("#te-newtag-name"); if (ni) ni.value = ""; }
+    refreshTagPick();
+    toast(`"${name}" created`);
+  };
+
   $("#te-someday").onclick = () => {
     $("#te-day").value = "";
     $("#te-someday").classList.remove("ghost");
@@ -1091,13 +1237,13 @@ function taskEditor(t) {
   $("#te-save").onclick = () => {
     const title = $("#te-title").value.trim();
     if (!title) { toast("It needs words"); return; }
-    let url = $("#te-url").value.trim();
+    let url = ($("#te-url")?.value || "").trim();
     if (url && !/^https?:\/\//i.test(url)) url = "https://" + url;
+    const color = selectedTags.length ? "" : picked; /* tag colors override item color */
     const data = {
-      title, day: $("#te-day").value || "someday", color: picked,
-      tags: parseTags($("#te-tags").value), notes: $("#te-notes").value.trim(), url,
+      title, day: $("#te-day").value || "someday", color,
+      tags: selectedTags, notes: ($("#te-notes")?.value || "").trim(), url,
     };
-    data.tags.forEach(tagColor); /* register colors for new tags */
     if (isNew) {
       const peers = alive(S.tasks).filter(x => x.day === data.day);
       const order = peers.length ? Math.max(...peers.map(x => x.order)) + 1 : 1;
@@ -1495,6 +1641,7 @@ function renderCalendar() {
           <button data-cm="month" class="${UI.calMode === "month" ? "active" : ""}">Month</button>
           <button data-cm="table" class="${UI.calMode === "table" ? "active" : ""}">Table</button>
           <button data-cm="list" class="${UI.calMode === "list" ? "active" : ""}">All</button>
+          <button data-cm="todos" class="${UI.calMode === "todos" ? "active" : ""}">To-dos</button>
         </div>
         <button class="btn primary small" id="cal-add">+ Assignment</button>
       </div>
@@ -1504,6 +1651,7 @@ function renderCalendar() {
   $$("#cal-seg button").forEach(b => b.onclick = () => { UI.calMode = b.dataset.cm; renderCalendar(); });
   if (UI.calMode === "month") renderCalMonth();
   else if (UI.calMode === "table") renderCalTable();
+  else if (UI.calMode === "todos") renderCalTodos();
   else renderCalList();
 }
 function renderCalTable() {
@@ -1649,6 +1797,29 @@ function renderCalList() {
   $$("#cal-body [data-asg]").forEach(r => r.onclick = () => {
     const a = S.assignments.find(x => x.id === r.dataset.asg);
     if (a) assignmentDetail(a);
+  });
+}
+function renderCalTodos() {
+  const ts = alive(S.tasks);
+  const key = t => t.day === "someday" ? "9999-99-99" : t.day;
+  const open = ts.filter(t => !t.done).sort((a, b) => key(a).localeCompare(key(b)) || a.order - b.order);
+  const done = ts.filter(t => t.done).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)).slice(0, 25);
+  $("#cal-body").innerHTML = `
+    <div class="card panel">
+      <div class="todo-table">
+        <div class="todo-head"><span></span><span>To-do</span><span style="text-align:right">Tags</span><span style="text-align:right">Due</span><span style="text-align:right">Days left</span></div>
+        ${open.length ? open.map(todoRowHtml).join("") : `<div class="empty" style="margin:12px 4px">No open to-dos. A rare gift.</div>`}
+        <div class="todo-new" id="cal-td-new"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg> New to-do</div>
+      </div>
+    </div>
+    ${done.length ? `<h2 style="font-size:15px;margin:20px 0 9px;color:var(--ink-faint)">Done</h2>
+      <div class="card panel"><div class="todo-table">${done.map(todoRowHtml).join("")}</div></div>` : ""}`;
+  $("#cal-td-new").onclick = () => taskEditor(null);
+  $$("#cal-body [data-tck]").forEach(ck => ck.onclick = e => { e.stopPropagation(); toggleTaskDone(ck.dataset.tck); });
+  $$("#cal-body [data-stop]").forEach(a => a.onclick = e => e.stopPropagation());
+  $$("#cal-body [data-tid]").forEach(r => r.onclick = () => {
+    const t = S.tasks.find(x => x.id === r.dataset.tid);
+    if (t) taskEditor(t);
   });
 }
 
