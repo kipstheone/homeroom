@@ -135,7 +135,7 @@ const UI = {
   view: "home", dashTab: "tomorrow", boardOffset: 0,
   routineDate: todayStr(), calMonth: null, calMode: "month",
   asgCourse: "all", asgType: "all", asgHideDone: false,
-  homeCal: null, dashCalTodos: false,
+  homeCal: null, dashCalTodos: true,
   linkEdit: false, arrange: false, weekMode: "list",
 };
 
@@ -1276,6 +1276,7 @@ function attachBoardEvents(boardEl) {
     if (!drag) return;
     drag.ghost?.remove();
     drag.card.classList.remove("dragging");
+    drag.card.style.touchAction = ""; /* restore native scroll */
     $$(".daycol.dragover").forEach(c => c.classList.remove("dragover"));
     drag = null;
   };
@@ -1283,15 +1284,20 @@ function attachBoardEvents(boardEl) {
     const card = e.target.closest(".tk");
     if (!card || e.target.closest(".ck")) return;
     if (e.pointerType === "mouse" && e.button !== 0) return;
+    /* on touch: disable native scroll on this card so pointer events own the gesture */
+    if (e.pointerType === "touch") card.style.touchAction = "none";
     drag = { card, id: card.dataset.id, kind: card.dataset.kind, startX: e.clientX, startY: e.clientY, moved: false, ghost: null, pid: e.pointerId };
     try { card.setPointerCapture(e.pointerId); } catch (_) { }
   });
   boardEl.addEventListener("pointermove", e => {
     if (!drag || e.pointerId !== drag.pid) return;
     if (!drag.moved && Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY) > 8) {
-      /* on touch, a mostly-vertical gesture is a scroll — let the browser have it */
-      if (e.pointerType !== "mouse" && Math.abs(e.clientY - drag.startY) > Math.abs(e.clientX - drag.startX) * 1.4) {
-        drag = null;
+      /* on desktop (horizontal board): abort if touch gesture is mostly vertical (scroll intent)
+         on mobile (vertical board): all directions are valid — never abort */
+      const mobileBoard = window.innerWidth < 680;
+      if (!mobileBoard && e.pointerType !== "mouse" &&
+          Math.abs(e.clientY - drag.startY) > Math.abs(e.clientX - drag.startX) * 1.4) {
+        cleanup();
         return;
       }
       drag.moved = true;
@@ -1734,11 +1740,17 @@ function renderCalMonth() {
 }
 function dayModal(day) {
   const evs = dueAssignments().filter(a => a.due === day);
+  const tasks = alive(S.tasks).filter(t => t.day === day);
   openModal(`
     <h2>${niceDate(day)}</h2>
     <div class="duelist" style="margin-bottom:4px">
-      ${evs.length ? evs.map(dueRowHtml).join("") : `<div class="empty">Nothing due. A gift.</div>`}
+      ${evs.length ? evs.map(dueRowHtml).join("") : `<div class="empty" style="margin:6px 0">No assignments due.</div>`}
     </div>
+    ${tasks.length ? `
+      <div style="font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint);margin:10px 0 4px">To-dos</div>
+      <div class="duelist" style="margin-bottom:4px">
+        ${tasks.map(taskRowForDash).join("")}
+      </div>` : ""}
     <div class="modal-actions">
       <button class="btn ghost" id="dm-close">Close</button>
       <button class="btn primary" id="dm-add">+ Add here</button>
@@ -1748,6 +1760,10 @@ function dayModal(day) {
   $$("#modal [data-asg]").forEach(r => r.onclick = () => {
     const a = S.assignments.find(x => x.id === r.dataset.asg);
     if (a) assignmentDetail(a);
+  });
+  $$("#modal [data-trow]").forEach(r => r.onclick = () => {
+    const t = S.tasks.find(x => x.id === r.dataset.trow);
+    if (t) { closeModal(); taskEditor(t); }
   });
 }
 function renderCalList() {

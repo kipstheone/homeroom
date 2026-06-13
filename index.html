@@ -258,7 +258,9 @@ html{background:var(--bg)}
   border-color:var(--accent);border-left-width:4px;
 }
 .tk.main .t{color:var(--accent-ink)}
-.tk.main .sub{font-size:11px;font-weight:700;color:var(--accent-ink);opacity:.75;display:block;margin-top:2px;letter-spacing:.03em}
+/* sub-label for ALL task cards (tag name) and main cards (type/course) */
+.tk .sub{font-size:11px;font-weight:700;display:block;margin-top:2px;letter-spacing:.03em;opacity:.75}
+.tk.main .sub{color:var(--accent-ink)}
 .addtask{
   font-size:13px;color:var(--ink-faint);text-align:left;padding:6px 9px;border-radius:10px;
   border:1.5px dashed transparent;font-weight:600;
@@ -510,6 +512,8 @@ html{background:var(--bg)}
 .todo-row .lkico:hover{color:var(--accent-ink)}
 /* assignment table keeps 5 columns (has course/type chip column) */
 .asg-table .todo-head,.asg-table .todo-row{grid-template-columns:26px minmax(0,1fr) auto auto auto}
+/* assignment .tt is plain text — reset flex layout so text isn't an anonymous flex item */
+.asg-table .todo-row .tt{display:block;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .todo-new{display:flex;align-items:center;gap:8px;padding:10px 8px;color:var(--ink-faint);font-weight:600;font-size:14px;cursor:pointer;border-radius:8px}
 .todo-new:hover{background:var(--bg-soft);color:var(--ink-soft)}
 .mini-todo{display:grid;grid-template-columns:24px minmax(0,1fr) auto auto;gap:9px;align-items:center;padding:7px 6px;border-bottom:1px solid var(--line)}
