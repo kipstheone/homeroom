@@ -144,6 +144,8 @@ html{background:var(--bg)}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff8f2}
 [data-theme="dark"] .btn.primary{color:#1d130f}
 .btn.small{padding:5px 11px;font-size:13px}
+/* nav prev/next arrow buttons — larger glyph so ‹ › are legible */
+#mc-prev,#mc-next,#cm-prev,#cm-next,#rt-prev,#rt-next,#wk-prev,#wk-next{font-size:18px;padding:2px 10px;line-height:1.2}
 .btn.ghost{border-color:transparent;background:transparent;color:var(--ink-soft)}
 .btn.ghost:hover{background:var(--bg-soft);box-shadow:none;color:var(--ink)}
 .btn.danger{color:var(--danger);border-color:var(--danger)}
@@ -384,6 +386,8 @@ html{background:var(--bg)}
 /* ---------- palette themes ---------- */
 [data-palette="meadow"]{--accent:#5c7f52;--accent-soft:#e3ecda;--accent-ink:#46663d;--bg:#f6f8ee;--bg-soft:#edf1dd;--card:#fdfef9;--card-2:#f2f5e5;--line:#e0e3cb;--line-strong:#ccd1ae}
 [data-theme="dark"][data-palette="meadow"]{--accent:#8fb583;--accent-soft:#2a3322;--accent-ink:#a9c89e;--bg:#171a13;--bg-soft:#1e2218;--card:#22261b;--card-2:#292e21;--line:#333a29;--line-strong:#454e36}
+[data-palette="ocean"]{--accent:#2962a8;--accent-soft:#d4e5f7;--accent-ink:#1d4d8a;--bg:#f3f7fc;--bg-soft:#e6eff9;--card:#fafdff;--card-2:#eaf3fc;--line:#ccddf0;--line-strong:#adc8e6}
+[data-theme="dark"][data-palette="ocean"]{--accent:#5c96d6;--accent-soft:#162338;--accent-ink:#85b8e8;--bg:#111820;--bg-soft:#172030;--card:#1c2636;--card-2:#222d3e;--line:#273650;--line-strong:#344868}
 [data-palette="tide"]{--accent:#46708f;--accent-soft:#dde9f0;--accent-ink:#385a78;--bg:#f3f7f8;--bg-soft:#e8eff1;--card:#fcfdfd;--card-2:#eef4f5;--line:#dde6e8;--line-strong:#c4d3d7}
 [data-theme="dark"][data-palette="tide"]{--accent:#84a9c9;--accent-soft:#22303c;--accent-ink:#a3c2dc;--bg:#131a1f;--bg-soft:#192127;--card:#1d262c;--card-2:#232d34;--line:#28343d;--line-strong:#374650}
 [data-palette="dusk"]{--accent:#7d5a78;--accent-soft:#ecdfe9;--accent-ink:#64485f;--bg:#f8f4f8;--bg-soft:#f0e8f0;--card:#fdfbfd;--card-2:#f4edf4;--line:#e6dbe5;--line-strong:#d2c1d0}
@@ -483,12 +487,17 @@ html{background:var(--bg)}
 /* ---------- arrange mode ---------- */
 .dashpanel{position:relative}
 .dashpanel.arranging{outline:2px dashed var(--accent);outline-offset:3px}
-.arrbar{display:flex;gap:4px;justify-content:flex-end;margin:-4px 0 9px}
+.arrbar{display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end;margin:-4px 0 9px}
 .arrbar button{font-size:11.5px;font-weight:800;padding:3px 9px;border-radius:7px;border:1.5px solid var(--line-strong);color:var(--ink-soft);background:var(--card)}
 .arrbar button:hover{color:var(--ink)}
 .arrbar button.on{background:var(--accent);border-color:var(--accent);color:#fff}
 [data-theme="dark"] .arrbar button.on{color:#16110d}
 .arrsep{width:10px}
+/* inline color swatch picker in arrbar */
+.hl-swatches{display:flex;flex-wrap:wrap;gap:6px;width:100%;padding-top:7px;margin-top:1px;border-top:1px solid var(--line-strong)}
+.hl-sw{width:26px;height:26px;border-radius:8px;border:2px solid var(--line-strong);cursor:pointer;transition:transform .1s,border-color .1s}
+.hl-sw:hover{transform:scale(1.18)}
+.hl-sw.sel{outline:2.5px solid var(--ink);outline-offset:2px}
 
 /* ---------- to-do table ---------- */
 .todo-table{display:flex;flex-direction:column}

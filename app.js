@@ -61,6 +61,7 @@ const HL_COLORS = ["", "#e3edf7", "#fdeae6", "#fbf3d9", "#e7f2e3", "#f2ebf6", "#
 const PALETTES = [
   { id: "hearth", name: "Hearth", swatch: "#b6543c" },
   { id: "meadow", name: "Meadow", swatch: "#5c7f52" },
+  { id: "ocean", name: "Ocean", swatch: "#2962a8" },
   { id: "tide", name: "Tide", swatch: "#46708f" },
   { id: "dusk", name: "Dusk", swatch: "#7d5a78" },
   { id: "ember", name: "Ember", swatch: "#a87b24" },
@@ -670,8 +671,25 @@ function renderHome() {
     const cur = dashLayout();
     const act = b.dataset.arr;
     if (act === "hl") {
-      const cycle = HL_COLORS;
-      cur[id].hl = cycle[(cycle.indexOf(cur[id].hl || "") + 1) % cycle.length];
+      /* toggle inline swatch picker inside the arrbar */
+      const arrbarEl = b.parentElement;
+      const existing = arrbarEl.querySelector(".hl-swatches");
+      if (existing) { existing.remove(); return; }
+      const div = document.createElement("div");
+      div.className = "hl-swatches";
+      div.innerHTML = HL_COLORS.map(c =>
+        `<button class="hl-sw${(cur[id].hl || "") === c ? " sel" : ""}" data-hlc="${c}"
+         style="${c ? `background:${c}` : "background:var(--card);border-style:dashed"}" title="${c || "none"}"></button>`
+      ).join("");
+      arrbarEl.appendChild(div);
+      div.querySelectorAll(".hl-sw").forEach(sw => sw.addEventListener("click", ev => {
+        ev.stopPropagation();
+        cur[id].hl = sw.dataset.hlc;
+        S.settings.dashLayout = cur;
+        persist();
+        renderHome();
+      }));
+      return; /* don't re-render yet */
     } else if (act === "up" || act === "down") {
       if (window.innerWidth < 680) {
         /* mobile: single column — treat all panels as one sequence (top → left → right) */
@@ -1471,16 +1489,20 @@ function renderRoutine() {
     ${(asg.length || dayTasks.length) ? `
       <h2 style="font-size:16px;margin:22px 0 10px;color:var(--ink-soft)">Also on this day</h2>
       <div class="routlist">
-        ${asg.map(a => `
-          <div class="routitem event mainasg ${a.status === "Done" ? "done" : ""}" data-asg="${a.id}">
+        ${asg.map(a => {
+          const atc = typeColor(a.type);
+          return `<div class="routitem event mainasg ${a.status === "Done" ? "done" : ""}" data-asg="${a.id}" style="border-left-color:${atc};background:color-mix(in srgb,${atc} 10%,var(--card))">
             <span class="ck ${a.status === "Done" ? "on" : ""}" data-ack="${a.id}"><svg viewBox="0 0 24 24"><path d="M4 12.5 10 18.5 20 6"/></svg></span>
             <div class="body"><div class="t">${esc(a.title)}</div><div class="meta">${esc(a.type)}${a.courseId ? " · " + esc(courseLabel(a.courseId)) : ""}${a.time ? " · " + fmtTime12(a.time) : ""}</div></div>
-          </div>`).join("")}
-        ${dayTasks.map(t => `
-          <div class="routitem event ${t.done ? "done" : ""}" data-task="${t.id}">
+          </div>`;}).join("")}
+        ${dayTasks.map(t => {
+          const tTagName = (t.tags || [])[0];
+          const ttc = tTagName ? tagColor(tTagName) : (t.color || "");
+          const tstyle = ttc ? ` style="border-left-color:${ttc};background:color-mix(in srgb,${ttc} 10%,var(--card))"` : "";
+          return `<div class="routitem event ${t.done ? "done" : ""}" data-task="${t.id}"${tstyle}>
             <span class="ck ${t.done ? "on" : ""}" data-tck="${t.id}"><svg viewBox="0 0 24 24"><path d="M4 12.5 10 18.5 20 6"/></svg></span>
-            <div class="body"><div class="t">${esc(t.title)}</div><div class="meta">from the week board</div></div>
-          </div>`).join("")}
+            <div class="body"><div class="t">${esc(t.title)}</div><div class="meta">${tTagName ? tTagName : "to-do"}</div></div>
+          </div>`;}).join("")}
       </div>` : ""}`;
   $("#rt-prev").onclick = () => { UI.routineDate = addDays(date, -1); renderRoutine(); };
   $("#rt-next").onclick = () => { UI.routineDate = addDays(date, 1); renderRoutine(); };
