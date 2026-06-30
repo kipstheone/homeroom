@@ -19,7 +19,7 @@ function parseDate(s) { const [y, m, d] = s.split("-").map(Number); return new D
 function todayStr() { return fmtDate(new Date()); }
 function addDays(s, n) { const d = parseDate(s); d.setDate(d.getDate() + n); return fmtDate(d); }
 function dayDiff(from, to) { return Math.round((parseDate(to) - parseDate(from)) / 864e5); }
-function startOfWeek(s) { const d = parseDate(s); const shift = (d.getDay() + 6) % 7; d.setDate(d.getDate() - shift); return fmtDate(d); } // Monday start
+function startOfWeek(s) { const d = parseDate(s); d.setDate(d.getDate() - d.getDay()); return fmtDate(d); } // Sunday start
 function niceDate(s) { const d = parseDate(s); return DOW[d.getDay()] + ", " + MONTHS[d.getMonth()].slice(0, 3) + " " + d.getDate(); }
 function fmtTime12(t) {
   if (!t) return "";
@@ -104,7 +104,7 @@ const DEFAULTS = {
   settings: {
     theme: "auto", palette: "hearth", look: "paper", dashLayout: null, banner: "", userName: "", dueStyle: "dot", todoStyle: "dot",
     testLookahead: 14, weeksShown: 1,
-    gcalClientId: "", gcalCalendarId: "", gcalHint: "",
+    gcalClientId: "", gcalCalendarId: "", gcalHint: "", gcalReminderMinutes: 1440,
     supaUrl: "", supaKey: "", syncId: "",
   },
 };
@@ -475,7 +475,7 @@ function dueRowHtml(a) {
 function dashCalHtml() {
   if (!UI.homeCal) { const d = new Date(); UI.homeCal = [d.getFullYear(), d.getMonth()]; }
   const [y, m] = UI.homeCal;
-  const lead = (new Date(y, m, 1).getDay() + 6) % 7; /* Monday start */
+  const lead = new Date(y, m, 1).getDay(); /* Sunday start */
   const dim = new Date(y, m + 1, 0).getDate();
   const rows = Math.ceil((lead + dim) / 7);
   /* build per-day event lists — assignments always, tasks when toggled */
@@ -531,7 +531,7 @@ function dashCalHtml() {
       </span>
     </div>
     <div class="calgrid dashcal">
-      ${["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map(d => `<span class="dow">${d}</span>`).join("")}
+      ${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(d => `<span class="dow">${d}</span>`).join("")}
       ${cells}
     </div>`;
 }
@@ -1028,7 +1028,9 @@ function todoRowHtml(t) {
       ${allTagChips ? `<span class="tt-tags">${allTagChips}</span>` : ""}
     </span>
     <span class="due-d">${dated ? niceDate(t.day) : "someday"}</span>
-    <span class="left-d ${dl ? dl.cls : ""}">${dl ? dl.txt : (t.done ? "done" : "—")}</span>
+    <span class="left-d ${dl ? dl.cls : ""}">
+      ${t.done ? `<button class="del-row" data-tdel="${t.id}">Delete</button>` : dl ? dl.txt : "—"}
+    </span>
   </div>`;
 }
 function renderTodoList() {
@@ -1061,6 +1063,14 @@ function renderTodoList() {
   $("#td-new").onclick = () => taskEditor(null);
   $$("#view-week [data-tck]").forEach(ck => ck.onclick = e => { e.stopPropagation(); toggleTaskDone(ck.dataset.tck); });
   $$("#view-week [data-stop]").forEach(a => a.onclick = e => e.stopPropagation());
+  $$("#view-week [data-tdel]").forEach(btn => btn.onclick = e => {
+    e.stopPropagation();
+    const t = S.tasks.find(x => x.id === btn.dataset.tdel);
+    if (!t) return;
+    confirmBox("Delete to-do?", `"${t.title}" will be removed permanently.`, "Delete", () => {
+      t.deleted = true; t.updatedAt = Date.now(); save(); renderWeek(); toast("Deleted");
+    }, true);
+  });
   $$("#view-week [data-tid]").forEach(r => r.onclick = () => {
     const t = S.tasks.find(x => x.id === r.dataset.tid);
     if (t) taskEditor(t);
@@ -1698,7 +1708,9 @@ function renderCalTable() {
           <span class="tt">${esc(a.title)}</span>
           <span class="tags">${a.courseId ? `<span class="chip c-faint">${esc(courseLabel(a.courseId))}</span>` : ""}${typeChip(a.type)}</span>
           <span class="due-d">${niceDate(a.due)}${a.time ? " " + fmtTime12(a.time) : ""}</span>
-          <span class="left-d ${dl ? dl.cls : ""}">${dl ? dl.txt : "done"}</span>
+          <span class="left-d ${dl ? dl.cls : ""}">
+            ${done ? `<button class="del-row" data-adel="${a.id}">Delete</button>` : dl ? dl.txt : "—"}
+          </span>
         </div>`;
       }).join("") : `<div class="empty" style="margin:12px 4px">Nothing due in ${MONTHS[m]}. Either heaven, or you forgot to add things.</div>`}
     </div></div>`;
@@ -1718,11 +1730,19 @@ function renderCalTable() {
       a.status = "Done"; a.updatedAt = Date.now(); save(); gcalQueuePush(); renderCalendar(); toast("Nice work.");
     });
   });
+  $$("#cal-body [data-adel]").forEach(btn => btn.onclick = e => {
+    e.stopPropagation();
+    const a = S.assignments.find(x => x.id === btn.dataset.adel);
+    if (!a) return;
+    confirmBox("Delete this assignment?", `"${a.title}" will be removed permanently.`, "Delete", () => {
+      a.deleted = true; a.updatedAt = Date.now(); save(); gcalQueuePush(); renderCalendar(); toast("Deleted");
+    }, true);
+  });
 }
 function renderCalMonth() {
   const [y, m] = UI.calMonth;
   const first = new Date(y, m, 1);
-  const lead = (first.getDay() + 6) % 7; // Monday-start offset
+  const lead = first.getDay(); // Sunday-start offset
   const cells = [];
   const gridStart = new Date(y, m, 1 - lead);
   for (let i = 0; i < 42; i++) {
@@ -1742,7 +1762,7 @@ function renderCalMonth() {
       </div>
     </div>
     <div class="calgrid">
-      ${["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map(d => `<div class="dow">${d}</div>`).join("")}
+      ${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(d => `<div class="dow">${d}</div>`).join("")}
       ${cells.map(d => {
         const ds = fmtDate(d);
         const inMonth = d.getMonth() === m;
@@ -1846,6 +1866,14 @@ function renderCalTodos() {
   $("#cal-td-new").onclick = () => taskEditor(null);
   $$("#cal-body [data-tck]").forEach(ck => ck.onclick = e => { e.stopPropagation(); toggleTaskDone(ck.dataset.tck); });
   $$("#cal-body [data-stop]").forEach(a => a.onclick = e => e.stopPropagation());
+  $$("#cal-body [data-tdel]").forEach(btn => btn.onclick = e => {
+    e.stopPropagation();
+    const t = S.tasks.find(x => x.id === btn.dataset.tdel);
+    if (!t) return;
+    confirmBox("Delete to-do?", `"${t.title}" will be removed permanently.`, "Delete", () => {
+      t.deleted = true; t.updatedAt = Date.now(); save(); renderCalendar(); toast("Deleted");
+    }, true);
+  });
   $$("#cal-body [data-tid]").forEach(r => r.onclick = () => {
     const t = S.tasks.find(x => x.id === r.dataset.tid);
     if (t) taskEditor(t);
@@ -1981,10 +2009,14 @@ function parseEvWhen(ev) {
 }
 function eventBody(a) {
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const reminderMin = S.settings.gcalReminderMinutes ?? 1440;
   const ev = {
     summary: a.title,
     description: [a.type, courseById(a.courseId) ? courseLabel(a.courseId) : "", a.status, a.notes].filter(Boolean).join(" · "),
     extendedProperties: { private: { hrid: a.id, courseId: a.courseId || "", type: a.type, status: a.status, app: "homeroom" } },
+    reminders: reminderMin < 0
+      ? { useDefault: false, overrides: [] }
+      : { useDefault: false, overrides: [{ method: "popup", minutes: reminderMin }] },
   };
   if (a.time) {
     const [h, m] = a.time.split(":").map(Number);
@@ -2348,7 +2380,21 @@ function renderSettings() {
       <h2>Google Calendar <button class="seemore" id="st-ghelp">setup instructions</button></h2>
       <div class="desc">Two-way sync into a dedicated "ODO" calendar in your Google account — so Google can handle reminders, and anything added there flows back here. Fields save as you type.</div>
       <div class="field"><label>OAuth Client ID</label><input id="st-gcid" value="${esc(s.gcalClientId)}" placeholder="xxxxx.apps.googleusercontent.com" autocomplete="off"></div>
-      <div style="display:flex;gap:9px;flex-wrap:wrap;align-items:center">
+      <div class="set-inline" style="margin-top:10px"><span>Notification reminder</span>
+        <select id="st-gcal-remind" style="border:1.5px solid var(--line-strong);background:var(--card);color:var(--ink);border-radius:9px;padding:6px 10px;font-weight:700">
+          <option value="-1" ${(s.gcalReminderMinutes ?? 1440) < 0 ? "selected" : ""}>No reminder</option>
+          <option value="30" ${(s.gcalReminderMinutes ?? 1440) === 30 ? "selected" : ""}>30 minutes before</option>
+          <option value="60" ${(s.gcalReminderMinutes ?? 1440) === 60 ? "selected" : ""}>1 hour before</option>
+          <option value="180" ${(s.gcalReminderMinutes ?? 1440) === 180 ? "selected" : ""}>3 hours before</option>
+          <option value="720" ${(s.gcalReminderMinutes ?? 1440) === 720 ? "selected" : ""}>12 hours before</option>
+          <option value="1440" ${(s.gcalReminderMinutes ?? 1440) === 1440 ? "selected" : ""}>1 day before</option>
+          <option value="2880" ${(s.gcalReminderMinutes ?? 1440) === 2880 ? "selected" : ""}>2 days before</option>
+          <option value="4320" ${(s.gcalReminderMinutes ?? 1440) === 4320 ? "selected" : ""}>3 days before</option>
+          <option value="10080" ${(s.gcalReminderMinutes ?? 1440) === 10080 ? "selected" : ""}>1 week before</option>
+        </select>
+      </div>
+      <div class="hint" style="margin-top:4px">Applies to all assignments pushed to Google Calendar.</div>
+      <div style="display:flex;gap:9px;flex-wrap:wrap;align-items:center;margin-top:10px">
         <button class="btn primary" id="st-gconnect">${gcalLinked() ? "Sync now" : "Connect Google"}</button>
         ${gcalLinked() ? `<button class="btn ghost danger" id="st-gdisc">Disconnect</button>` : ""}
         <span class="hint">${gcalLinked() ? "Connected — sign-in refreshes about every hour." : "Not connected yet."}</span>
@@ -2421,6 +2467,7 @@ function renderSettings() {
   $("#st-typecolors").onclick = typeColorEditor;
   /* auto-save sync fields as they're typed/pasted, so nothing is lost if the view re-renders */
   $("#st-gcid").oninput = e => { s.gcalClientId = e.target.value.trim(); tokenClient = null; persist(); };
+  $("#st-gcal-remind").onchange = e => { s.gcalReminderMinutes = +e.target.value; persist(); toast("Reminder updated"); };
   $("#st-surl").oninput = e => { s.supaUrl = e.target.value.trim(); persist(); };
   $("#st-skey").oninput = e => { s.supaKey = e.target.value.trim(); persist(); };
   $("#st-sid").oninput = e => { s.syncId = e.target.value.trim(); persist(); };
