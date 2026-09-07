@@ -2,7 +2,7 @@
 /* ============================================================
    ODO — app logic
    ============================================================ */
-const APP_VERSION = "v1.6.0";
+const APP_VERSION = "v1.6.1";
 
 /* ---------- tiny helpers ---------- */
 const $ = s => document.querySelector(s);
@@ -2528,20 +2528,41 @@ async function ensureCalendar() {
 }
 /* Separate calendar so class blocks can be toggled off in Google without
    hiding assignment deadlines. */
-const CLASS_CAL_NAME = "ODO - Classes";
+const CLASS_CAL_NAME = "ODO - Courses";
+const CLASS_CAL_OLD_NAMES = ["ODO - Classes"]; /* rename in place instead of orphaning */
 async function ensureClassCalendar() {
-  if (S.settings.gcalClassCalendarId) return S.settings.gcalClassCalendarId;
-  const list = await gfetch("/users/me/calendarList?maxResults=250");
-  const found = (list?.items || []).find(c => c.summary === CLASS_CAL_NAME);
-  let id = found?.id;
+  let id = S.settings.gcalClassCalendarId;
   if (!id) {
+    const list = await gfetch("/users/me/calendarList?maxResults=250");
+    const items = list?.items || [];
+    const found = items.find(c => c.summary === CLASS_CAL_NAME)
+      || items.find(c => CLASS_CAL_OLD_NAMES.includes(c.summary));
+    id = found?.id;
+  }
+  if (id) {
+    /* keep the title current (covers the Classes -> Courses rename) */
+    try {
+      await gfetch(`/calendars/${encodeURIComponent(id)}`, {
+        method: "PATCH", body: JSON.stringify({ summary: CLASS_CAL_NAME }),
+      });
+    } catch (e) { /* a rename failing shouldn't stop the sync */ }
+  } else {
     const created = await gfetch("/calendars", {
       method: "POST",
-      body: JSON.stringify({ summary: CLASS_CAL_NAME, description: "Your class meeting times, kept in sync by ODO." }),
+      body: JSON.stringify({ summary: CLASS_CAL_NAME, description: "Your course meeting times, kept in sync by ODO." }),
     });
     id = created?.id;
   }
-  if (!id) throw new Error("no class calendar");
+  if (!id) throw new Error("could not create the course calendar");
+  /* a freshly made calendar can land unchecked in the sidebar — force it visible */
+  try {
+    await gfetch("/users/me/calendarList", { method: "POST", body: JSON.stringify({ id }) });
+  } catch (e) { /* already in the list */ }
+  try {
+    await gfetch(`/users/me/calendarList/${encodeURIComponent(id)}`, {
+      method: "PATCH", body: JSON.stringify({ selected: true, hidden: false }),
+    });
+  } catch (e) { }
   S.settings.gcalClassCalendarId = id;
   persist();
   return id;
@@ -2567,7 +2588,9 @@ function classEventBody(course, m) {
   })();
   /* end-before-start means it runs past midnight — push the end to the next day */
   const endDay = MINS(end) <= MINS(m.start) ? addDays(startDay, 1) : startDay;
-  const until = fmtDate(addDays(startDay, 365)).replace(/-/g, "") + "T235959Z";
+  /* addDays already returns YYYY-MM-DD — passing it through fmtDate threw and
+     silently killed the whole class sync. */
+  const until = addDays(startDay, 365).replace(/-/g, "") + "T235959Z";
   const byday = [...m.days].sort((a, b) => a - b).map(d => RRULE_DAYS[d]).join(",");
   return {
     summary: (course.code || course.name) + (tag ? " · " + tag : ""),
@@ -2600,15 +2623,17 @@ async function gcalPushClasses(classCalId) {
       delete map[key];
     }
   }
+  let n = 0;
   for (const [key, { c, m }] of wanted) {
     const body = JSON.stringify(classEventBody(c, m));
     let saved = null;
     if (map[key]) saved = await gfetch(`/calendars/${encodeURIComponent(classCalId)}/events/${encodeURIComponent(map[key])}`, { method: "PUT", body });
     if (!saved) saved = await gfetch(`/calendars/${encodeURIComponent(classCalId)}/events`, { method: "POST", body });
-    if (saved?.id) map[key] = saved.id;
+    if (saved?.id) { map[key] = saved.id; n++; }
   }
   S.settings.gcalClassEventIds = map;
   persist();
+  return n;
 }
 function parseEvWhen(ev) {
   const st = ev.start || {};
@@ -2735,9 +2760,18 @@ async function gcalSync(mode = false) {
     await gcalPull(calId);
     await gcalPush(calId);
     if (S.settings.gcalSyncClasses !== false) {
-      /* class blocks live on their own calendar and never pull back into the app */
-      try { await gcalPushClasses(await ensureClassCalendar()); }
-      catch (e) { console.warn("class calendar", e); }
+      /* course blocks live on their own calendar and never pull back into the app.
+         Failures here are recorded, not swallowed — a silent catch hid a crash
+         in this path for two releases. */
+      try {
+        const n = await gcalPushClasses(await ensureClassCalendar());
+        LAST_SYNC_ERR.classes = "";
+        if (interactive) toast(n ? `${n} course time${n === 1 ? "" : "s"} synced` : "No course meeting times to sync");
+      } catch (e) {
+        LAST_SYNC_ERR.classes = gcalReason(e);
+        console.warn("course calendar:", e);
+        if (interactive) toast("Course times failed — see Settings");
+      }
     }
     persist();
     scheduleCloudPush();
@@ -2904,7 +2938,7 @@ async function cloudSync(interactive = false) {
   cloudBusy = false;
 }
 /* Last failure reason per service, so Settings can show it instead of a shrug. */
-const LAST_SYNC_ERR = { supa: "", gcal: "" };
+const LAST_SYNC_ERR = { supa: "", gcal: "", classes: "" };
 function syncErrorModal(title, reason, helpFn) {
   openModal(`
     <h2>${esc(title)}</h2>
@@ -3071,8 +3105,8 @@ function renderSettings() {
       </div>
       <div class="hint" style="margin-top:4px">Applies to all assignments pushed to Google Calendar.</div>
 
-      <div class="desc" style="margin-top:16px">Class meeting times sync separately to a <b>${esc(CLASS_CAL_NAME)}</b> calendar, so you can hide class blocks in Google without losing your deadlines.</div>
-      <div class="set-inline"><span>Sync class times</span>
+      <div class="desc" style="margin-top:16px">Course meeting times sync separately to a <b>${esc(CLASS_CAL_NAME)}</b> calendar, so you can hide course blocks in Google without losing your deadlines.</div>
+      <div class="set-inline"><span>Sync course times</span>
         <button class="btn small ${s.gcalSyncClasses !== false ? "primary" : ""}" id="st-gcal-classtog">${s.gcalSyncClasses !== false ? "On" : "Off"}</button>
       </div>
       <div class="set-inline"><span>Class reminder</span>
@@ -3086,7 +3120,15 @@ function renderSettings() {
           <option value="60" ${(s.gcalClassReminderMinutes ?? -1) === 60 ? "selected" : ""}>1 hour before</option>
         </select>
       </div>
-      <div class="hint" style="margin-top:4px">Class blocks are silent by default. If you turn a reminder on, it's the only one — nothing fires earlier.</div>
+      <div class="hint" style="margin-top:4px">Course blocks are silent by default. If you turn a reminder on, it's the only one — nothing fires earlier.</div>
+      <div style="display:flex;gap:9px;flex-wrap:wrap;align-items:center;margin-top:10px">
+        <button class="btn" id="st-gcal-classsync">Sync course times now</button>
+        <span class="hint">${(() => {
+          const n = alive(S.courses).reduce((t, c) => t + (c.meetings || []).filter(m => m.days?.length && m.start).length, 0);
+          return n ? `${n} meeting time${n === 1 ? "" : "s"} across your courses` : "No meeting times set on any course yet";
+        })()}</span>
+      </div>
+      ${LAST_SYNC_ERR.classes ? `<div class="syncerr">Course times: ${esc(LAST_SYNC_ERR.classes)}</div>` : ""}
       <div style="display:flex;gap:9px;flex-wrap:wrap;align-items:center;margin-top:10px">
         <button class="btn primary" id="st-gconnect">${gcalLinked() ? "Sync now" : "Connect Google"}</button>
         ${gcalLinked() ? `<button class="btn ghost danger" id="st-gdisc">Disconnect</button>` : ""}
@@ -3167,6 +3209,20 @@ function renderSettings() {
   $("#st-gcal-classremind").onchange = e => {
     s.gcalClassReminderMinutes = +e.target.value;
     persist(); gcalQueuePush(); toast("Class reminder updated");
+  };
+  $("#st-gcal-classsync").onclick = async () => {
+    if (!gcalLinked()) { toast("Connect Google first"); return; }
+    toast("Syncing course times…");
+    try {
+      const n = await gcalPushClasses(await ensureClassCalendar());
+      LAST_SYNC_ERR.classes = "";
+      toast(n ? `${n} course time${n === 1 ? "" : "s"} synced to ${CLASS_CAL_NAME}` : "No meeting times to sync");
+    } catch (e) {
+      LAST_SYNC_ERR.classes = gcalReason(e);
+      console.warn("course calendar:", e);
+      syncErrorModal("Course times failed", LAST_SYNC_ERR.classes, gcalHelp);
+    }
+    renderSettings();
   };
   $("#st-gcal-classtog").onclick = () => {
     s.gcalSyncClasses = s.gcalSyncClasses === false;
