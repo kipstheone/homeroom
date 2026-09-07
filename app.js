@@ -2,7 +2,7 @@
 /* ============================================================
    ODO — app logic
    ============================================================ */
-const APP_VERSION = "v1.5.0";
+const APP_VERSION = "v1.6.0";
 
 /* ---------- tiny helpers ---------- */
 const $ = s => document.querySelector(s);
@@ -106,6 +106,7 @@ const DEFAULTS = {
   customTypes: [],   // [{name, personal:bool}] user-made categories
   customTypesU: 0,   // last modified ts for customTypes
   __m2: true,        // look-migration flag
+  __m3: true,        // silent-class-reminders migration flag
   links: [            // {id,title,url,color,updatedAt,deleted}
     { id: "lk-gmail", title: "Gmail", url: "https://mail.google.com", color: "#b6543c", updatedAt: 1, deleted: false },
     { id: "lk-canvas", title: "Canvas", url: "https://canvas.instructure.com", color: "#5f7d54", updatedAt: 1, deleted: false },
@@ -114,7 +115,8 @@ const DEFAULTS = {
     theme: "auto", palette: "hearth", look: "paper", dashLayout: null, banner: "", userName: "", dueStyle: "dot", todoStyle: "dot",
     testLookahead: 14, weeksShown: 1,
     gcalClientId: "", gcalCalendarId: "", gcalHint: "", gcalReminderMinutes: 1440,
-    gcalClassCalendarId: "", gcalClassReminderMinutes: 15, gcalSyncClasses: true,
+    /* class blocks are reference, not deadlines — silent unless you ask */
+    gcalClassCalendarId: "", gcalClassReminderMinutes: -1, gcalSyncClasses: true,
     supaUrl: "", supaKey: "", syncId: "",
   },
 };
@@ -129,6 +131,8 @@ function loadState() {
         settings: { ...DEFAULTS.settings, ...(o.settings || {}) },
       };
       if (!o.__m2) { st.settings.look = "paper"; st.__m2 = true; } /* one-time: new default look */
+      /* one-time: class events should be silent by default */
+      if (!o.__m3) { st.settings.gcalClassReminderMinutes = -1; st.__m3 = true; }
       return st;
     }
   } catch (e) { console.warn("state load failed", e); }
@@ -150,7 +154,7 @@ const UI = {
   routineDate: todayStr(), calMonth: null, calMode: "month",
   asgCourse: "all", asgType: "all", asgHideDone: false,
   homeCal: null, dashCalTodos: true,
-  linkEdit: false, arrange: false, weekMode: "week", courseMode: "cards",
+  linkEdit: false, arrange: false, weekMode: "week", courseMode: "cards", dashDayOffset: 0,
 };
 
 /* ---------- theme ---------- */
@@ -710,10 +714,25 @@ function renderHome() {
       <h2>Courses <button class="seemore" data-go="courses">manage</button></h2>
       ${courses.length ? `<div class="coursegrid">${courses.map(c => courseCardHtml(c)).join("")}</div>`
         : `<div class="empty">No courses yet — add them in the Courses tab.</div>`}`,
-    routine: `
-      <h2>Today <button class="seemore" data-go="routine">open</button></h2>
-      ${hasDaily ? schedHtml(today, "data-hrck", true)
-        : `<div class="empty">No routine set for ${DOW_FULL[dow]}s.</div>`}`,
+    routine: (() => {
+      const day = addDays(today, UI.dashDayOffset || 0);
+      const dDow = parseDate(day).getDay();
+      const label = UI.dashDayOffset === 0 ? "Today"
+        : UI.dashDayOffset === 1 ? "Tomorrow"
+        : UI.dashDayOffset === -1 ? "Yesterday"
+        : niceDate(day);
+      const di = dailyItems(dDow);
+      const any = di.anytime.length || di.timed.length;
+      return `
+      <h2>${esc(label)} <span style="display:flex;gap:5px;align-items:center">
+        <button class="seemore daynudge" id="dr-prev" aria-label="previous day">‹</button>
+        ${UI.dashDayOffset ? `<button class="seemore" id="dr-today">today</button>` : ""}
+        <button class="seemore daynudge" id="dr-next" aria-label="next day">›</button>
+        <button class="seemore" id="dr-open">open</button>
+      </span></h2>
+      ${any ? schedHtml(day, "data-hrck", true)
+        : `<div class="empty">Nothing scheduled for ${DOW_FULL[dDow]}.</div>`}`;
+    })(),
     weektasks: `
       <h2>To-dos <span style="display:flex;gap:6px;align-items:center">
         <button class="seemore" id="todo-style-toggle">style: ${S.settings.todoStyle === "fill" ? "filled" : "dots"}</button>
@@ -823,6 +842,17 @@ function renderHome() {
   });
   $$("#view-home [data-dtab]").forEach(b => b.onclick = () => { UI.dashTab = b.dataset.dtab; renderHome(); });
   $$("#view-home [data-go]").forEach(b => b.onclick = e => { e.stopPropagation(); nav(b.dataset.go); });
+  /* dashboard day panel: step through days without leaving home */
+  const stepDay = n => { UI.dashDayOffset = (UI.dashDayOffset || 0) + n; renderHome(); };
+  const drPrev = $("#dr-prev"), drNext = $("#dr-next"), drToday = $("#dr-today"), drOpen = $("#dr-open");
+  if (drPrev) drPrev.onclick = e => { e.stopPropagation(); stepDay(-1); };
+  if (drNext) drNext.onclick = e => { e.stopPropagation(); stepDay(1); };
+  if (drToday) drToday.onclick = e => { e.stopPropagation(); UI.dashDayOffset = 0; renderHome(); };
+  if (drOpen) drOpen.onclick = e => {
+    e.stopPropagation();
+    UI.routineDate = addDays(todayStr(), UI.dashDayOffset || 0);
+    nav("routine");
+  };
   $$("#view-home [data-asg]").forEach(r => r.onclick = () => { const a = S.assignments.find(x => x.id === r.dataset.asg); if (a) assignmentDetail(a); });
   $$("#view-home [data-course]").forEach(r => r.onclick = () => { const c = courseById(r.dataset.course); if (c) courseDetail(c); });
   /* dashboard calendar */
@@ -841,7 +871,8 @@ function renderHome() {
   /* routine check-off from home (checkbox or whole row) */
   $$("#view-home [data-hrck]").forEach(ck => ck.onclick = e => {
     e.stopPropagation();
-    toggleRoutCheck(today, ck.dataset.hrck);
+    /* check off against the day the panel is showing, not always today */
+    toggleRoutCheck(addDays(today, UI.dashDayOffset || 0), ck.dataset.hrck);
     renderHome();
   });
   $$("#view-home [data-sched]").forEach(row => row.onclick = () => {
@@ -1327,9 +1358,10 @@ function weekDayColHtml(day) {
   });
 
   return `<div class="wk-col ${isToday ? "today" : ""}" data-wcol="${day}">
-    <div class="wk-head">
+    <div class="wk-head" data-wopen="${day}" role="button" tabindex="0" title="Open ${esc(niceDate(day))} in Daily">
       <span class="wk-dn">${isToday ? "Today" : DOW[d.getDay()]}</span>
       <span class="wk-dd">${MONTHS[d.getMonth()].slice(0, 3)} ${d.getDate()}</span>
+      <span class="wk-open">open day →</span>
     </div>
     <div class="wk-body">
       ${untimed.map(e => wkEntryHtml(e, day)).join("")}
@@ -1375,6 +1407,12 @@ function renderWeekAgenda() {
   $("#wk-today").onclick = () => { UI.boardOffset = 0; renderWeek(); };
   $("#wk-addtodo").onclick = () => taskEditor(null);
   $$("#view-week [data-wadd]").forEach(b => b.onclick = e => { e.stopPropagation(); taskEditor(null, b.dataset.wadd); });
+  /* tapping a day header jumps to that day's Daily view */
+  $$("#view-week [data-wopen]").forEach(h => {
+    const go = () => { UI.routineDate = h.dataset.wopen; nav("routine"); };
+    h.onclick = e => { e.stopPropagation(); go(); };
+    h.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } };
+  });
   $$("#view-week [data-wtck]").forEach(ck => ck.onclick = e => { e.stopPropagation(); toggleTaskDone(ck.dataset.wtck); });
   $$("#view-week [data-wtask]").forEach(r => r.onclick = () => {
     const t = S.tasks.find(x => x.id === r.dataset.wtask);
@@ -2519,7 +2557,7 @@ function firstOccurrence(days, from) {
 }
 function classEventBody(course, m) {
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const remind = S.settings.gcalClassReminderMinutes;
+  const remind = S.settings.gcalClassReminderMinutes ?? -1;
   const tag = meetKindTag(m.kind);
   const startDay = firstOccurrence(m.days, todayStr());
   const end = m.end || (() => {
@@ -3039,16 +3077,16 @@ function renderSettings() {
       </div>
       <div class="set-inline"><span>Class reminder</span>
         <select id="st-gcal-classremind" style="border:1.5px solid var(--line-strong);background:var(--card);color:var(--ink);border-radius:9px;padding:6px 10px;font-weight:700">
-          <option value="-1" ${(s.gcalClassReminderMinutes ?? 15) < 0 ? "selected" : ""}>No reminder</option>
-          <option value="0" ${(s.gcalClassReminderMinutes ?? 15) === 0 ? "selected" : ""}>At start time</option>
-          <option value="5" ${(s.gcalClassReminderMinutes ?? 15) === 5 ? "selected" : ""}>5 minutes before</option>
-          <option value="10" ${(s.gcalClassReminderMinutes ?? 15) === 10 ? "selected" : ""}>10 minutes before</option>
-          <option value="15" ${(s.gcalClassReminderMinutes ?? 15) === 15 ? "selected" : ""}>15 minutes before</option>
-          <option value="30" ${(s.gcalClassReminderMinutes ?? 15) === 30 ? "selected" : ""}>30 minutes before</option>
-          <option value="60" ${(s.gcalClassReminderMinutes ?? 15) === 60 ? "selected" : ""}>1 hour before</option>
+          <option value="-1" ${(s.gcalClassReminderMinutes ?? -1) < 0 ? "selected" : ""}>No reminder (default)</option>
+          <option value="0" ${(s.gcalClassReminderMinutes ?? -1) === 0 ? "selected" : ""}>At start time</option>
+          <option value="5" ${(s.gcalClassReminderMinutes ?? -1) === 5 ? "selected" : ""}>5 minutes before</option>
+          <option value="10" ${(s.gcalClassReminderMinutes ?? -1) === 10 ? "selected" : ""}>10 minutes before</option>
+          <option value="15" ${(s.gcalClassReminderMinutes ?? -1) === 15 ? "selected" : ""}>15 minutes before</option>
+          <option value="30" ${(s.gcalClassReminderMinutes ?? -1) === 30 ? "selected" : ""}>30 minutes before</option>
+          <option value="60" ${(s.gcalClassReminderMinutes ?? -1) === 60 ? "selected" : ""}>1 hour before</option>
         </select>
       </div>
-      <div class="hint" style="margin-top:4px">Exactly one reminder per class — nothing fires earlier than this.</div>
+      <div class="hint" style="margin-top:4px">Class blocks are silent by default. If you turn a reminder on, it's the only one — nothing fires earlier.</div>
       <div style="display:flex;gap:9px;flex-wrap:wrap;align-items:center;margin-top:10px">
         <button class="btn primary" id="st-gconnect">${gcalLinked() ? "Sync now" : "Connect Google"}</button>
         ${gcalLinked() ? `<button class="btn ghost danger" id="st-gdisc">Disconnect</button>` : ""}
