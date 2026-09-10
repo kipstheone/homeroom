@@ -402,8 +402,16 @@ html{background:var(--bg)}
 [data-theme="dark"][data-palette="ember"]{--accent:#d2a956;--accent-soft:#383017;--accent-ink:#e2c277;--bg:#1a1712;--bg-soft:#211d16;--card:#262119;--card-2:#2d271e;--line:#393223;--line-strong:#4d4430}
 
 /* ---------- mini calendar (dashboard) ---------- */
-.mc-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:7px}
-.mc-head .mc-title{font-family:var(--font-display);font-size:16.5px;font-weight:600}
+/* Wraps to a second line rather than squashing buttons — this panel is narrow
+   on phones AND in the dashboard's side column, so it must survive both. */
+.mc-head{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:6px 10px;margin-bottom:9px}
+.mc-head .mc-title{font-family:var(--font-display);font-size:16.5px;font-weight:600;white-space:nowrap}
+.mc-ctrls{display:flex;align-items:center;gap:5px;flex-wrap:wrap;justify-content:flex-end;flex:1 1 auto}
+/* never let a button break its own label across lines */
+.mc-head .btn,.mc-head .seemore{white-space:nowrap;flex-shrink:0}
+.mc-head .seemore{font-size:11px}
+.mc-head .btn.small{padding:4px 9px;font-size:12px}
+.mc-head #mc-prev,.mc-head #mc-next{font-size:16px;padding:1px 9px;line-height:1.25}
 .mc-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;text-align:center}
 .mc-dow{font-size:9.5px;font-weight:800;letter-spacing:.06em;color:var(--ink-faint);padding:2px 0;text-transform:uppercase}
 .mc-day{position:relative;padding:5px 0 11px;border-radius:8px;font-size:12px;font-weight:700;color:var(--ink-soft);cursor:pointer}
@@ -817,6 +825,12 @@ html{background:var(--bg)}
   .tl-now{left:44px}
   .tl-blocks{left:52px}
   .tl-quarter{left:52px}
+  /* calendar panel header: title on its own line, controls beneath it */
+  .mc-head{gap:5px}
+  .mc-head .mc-title{flex:1 1 100%;font-size:15.5px}
+  .mc-ctrls{flex:1 1 100%;justify-content:flex-start}
+  .mc-head .btn.small{padding:4px 8px;font-size:11.5px}
+  .mc-head .seemore{font-size:10.5px}
   /* timetable scrolls sideways rather than crushing 7 columns */
   .tt-wrap{padding:8px}
   .tt-grid{grid-template-columns:44px repeat(7,minmax(78px,1fr))}

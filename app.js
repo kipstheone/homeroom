@@ -2,7 +2,7 @@
 /* ============================================================
    ODO — app logic
    ============================================================ */
-const APP_VERSION = "v1.7.1";
+const APP_VERSION = "v1.7.2";
 
 /* ---------- tiny helpers ---------- */
 const $ = s => document.querySelector(s);
@@ -571,8 +571,9 @@ function dashCalHtml() {
   }
   return `
     <div class="mc-head">
-      <span class="mc-title">${MONTHS[m]} ${y} <button class="seemore" id="dc-todotog" style="font-size:11px">${UI.dashCalTodos ? "hide to-dos" : "+ to-dos"}</button></span>
-      <span style="display:flex;gap:5px">
+      <span class="mc-title">${MONTHS[m]} ${y}</span>
+      <span class="mc-ctrls">
+        <button class="seemore" id="dc-todotog">${UI.dashCalTodos ? "hide to-dos" : "+ to-dos"}</button>
         <button class="btn small primary" id="dc-addevent" title="Add an event">+ Event</button>
         <button class="btn small" id="mc-prev" aria-label="previous month">‹</button>
         <button class="btn small ghost" id="mc-today">Today</button>
@@ -3324,6 +3325,12 @@ function renderSettings() {
         <input type="file" id="st-file" accept=".json" style="display:none">
       </div>
     </div>
+
+    <div class="card set-section">
+      <h2>App version</h2>
+      <div class="desc">This device is running <b>ODO ${APP_VERSION}</b>. If a device is showing an older layout than another, it's holding a cached copy — force an update here. Your data isn't touched.</div>
+      <button class="btn" id="st-forceupdate">Force update</button>
+    </div>
     <div class="hint" id="ver-line" style="text-align:center;padding:4px 0 20px;cursor:pointer">ODO ${APP_VERSION} · One Day, or Day One<br>
       <span style="font-size:10px;opacity:.7">${(() => {
         const vv = window.visualViewport;
@@ -3413,6 +3420,21 @@ function renderSettings() {
   $("#st-ssave").onclick = () => {
     if (supaConfigured()) { cloudSync(true); toast("Syncing…"); }
     else toast("Fill in all three fields to enable sync");
+  };
+  $("#st-forceupdate").onclick = async () => {
+    toast("Fetching the latest build…");
+    try {
+      /* drop every cache and worker, then hard-load from the network */
+      if ("caches" in window) {
+        const keys = await caches.keys();
+        await Promise.all(keys.map(k => caches.delete(k)));
+      }
+      if ("serviceWorker" in navigator) {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(regs.map(r => r.unregister()));
+      }
+    } catch (e) { console.warn("force update", e); }
+    location.reload();
   };
   $("#st-export").onclick = () => {
     const blob = new Blob([JSON.stringify(S, null, 2)], { type: "application/json" });
@@ -3598,7 +3620,20 @@ function init() {
     persist(); applyTheme();
   };
   nav("home");
-  if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => { });
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("sw.js").then(reg => {
+      /* poll for a new build so a long-lived desktop tab can't sit on stale code */
+      reg.update().catch(() => { });
+      setInterval(() => reg.update().catch(() => { }), 15 * 60 * 1000);
+    }).catch(() => { });
+    /* when a new worker takes over, reload once so the fresh files are actually used */
+    let reloading = false;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (reloading) return;
+      reloading = true;
+      location.reload();
+    });
+  }
   if (supaConfigured()) cloudSync();
   else setPill("local only");
   if (gcalLinked() && S.settings.gcalClientId) setTimeout(() => gcalSync(false), 1500);
