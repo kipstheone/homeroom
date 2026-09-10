@@ -2,7 +2,7 @@
 /* ============================================================
    ODO — app logic
    ============================================================ */
-const APP_VERSION = "v1.6.1";
+const APP_VERSION = "v1.7.0";
 
 /* ---------- tiny helpers ---------- */
 const $ = s => document.querySelector(s);
@@ -97,6 +97,8 @@ const DEFAULTS = {
   assignments: [],   // {id,title,courseId,type,status,due,time,notes,gcalId,updatedAt,deleted}
   tasks: [],         // {id,title,day:'YYYY-MM-DD'|'someday',done,order,updatedAt,deleted}
   routines: [],      // {id,title,time,days:[0-6],order,updatedAt,deleted}
+  events: [],        // {id,title,date:'YYYY-MM-DD',start,end,location,color,notes,updatedAt,deleted}
+                     // one-off things that happen at a time — not deadlines, not habits
   routineChecks: {}, // {'YYYY-MM-DD': {routineId:true, ...}}
   routineCheckMeta: {}, // {'YYYY-MM-DD': lastModifiedTs}
   tags: {},          // {tagName: colorHex}
@@ -506,6 +508,10 @@ function dashCalHtml() {
   for (const a of dueAssignments()) {
     (byDay[a.due] = byDay[a.due] || { asg: [], tasks: [] }).asg.push(a);
   }
+  for (const ev of alive(S.events)) {
+    if (!byDay[ev.date]) byDay[ev.date] = { asg: [], tasks: [], events: [] };
+    (byDay[ev.date].events = byDay[ev.date].events || []).push(ev);
+  }
   if (UI.dashCalTodos) {
     for (const t of alive(S.tasks).filter(x => x.day !== "someday")) {
       if (!byDay[t.day]) byDay[t.day] = { asg: [], tasks: [] };
@@ -518,19 +524,23 @@ function dashCalHtml() {
     const d = new Date(y, m, i - lead + 1);
     const ds = fmtDate(d);
     const inM = d.getMonth() === m;
-    const { asg = [], tasks = [] } = byDay[ds] || {};
-    const allEvs = [...asg, ...tasks];
-    /* event chips: assignments show type glyph, tasks show a small circle */
+    const { asg = [], tasks = [], events = [] } = byDay[ds] || {};
+    const allEvs = [...asg, ...events, ...tasks];
+    /* chips: assignments show a type glyph, events a clock, tasks a small circle */
+    const evChips = events.slice(0, 2).map(ev =>
+      `<span class="calev" style="background:${ev.color || EVENT_DEFAULT_COLOR}">◷ ${esc(ev.title)}</span>`);
     const chips = [
       ...asg.slice(0, 2).map(a => `<span class="calev ${a.status === "Done" ? "struck" : ""}" style="background:${asgAccent(a)}">${typeGlyph(a.type, 9)}${esc(a.title)}</span>`),
-      ...(UI.dashCalTodos ? tasks.slice(0, Math.max(0, 2 - asg.length)).map(t => {
+      ...evChips.slice(0, Math.max(0, 2 - asg.length)),
+      ...(UI.dashCalTodos ? tasks.slice(0, Math.max(0, 2 - asg.length - evChips.length)).map(t => {
         const tc = (t.tags || [])[0] ? tagColor(t.tags[0]) : (t.color || "#8fa3ad");
         return `<span class="calev ${t.done ? "struck" : ""}" style="background:${tc}">◉ ${esc(t.title)}</span>`;
       }) : []),
     ];
     const dotbar = [
       ...asg.slice(0, 6).map(a => `<span class="evdot" style="background:${asgAccent(a)};${a.status === "Done" ? "opacity:.35" : ""}"></span>`),
-      ...(UI.dashCalTodos ? tasks.slice(0, Math.max(0, 6 - asg.length)).map(t => {
+      ...events.slice(0, Math.max(0, 6 - asg.length)).map(ev => `<span class="evdot" style="background:${ev.color || EVENT_DEFAULT_COLOR}"></span>`),
+      ...(UI.dashCalTodos ? tasks.slice(0, Math.max(0, 6 - asg.length - events.length)).map(t => {
         const tc = (t.tags || [])[0] ? tagColor(t.tags[0]) : (t.color || "#8fa3ad");
         return `<span class="evdot" style="background:${tc};${t.done ? "opacity:.35" : ""}"></span>`;
       }) : []),
@@ -548,6 +558,7 @@ function dashCalHtml() {
     <div class="mc-head">
       <span class="mc-title">${MONTHS[m]} ${y} <button class="seemore" id="dc-todotog" style="font-size:11px">${UI.dashCalTodos ? "hide to-dos" : "+ to-dos"}</button></span>
       <span style="display:flex;gap:5px">
+        <button class="btn small primary" id="dc-addevent" title="Add an event">+ Event</button>
         <button class="btn small" id="mc-prev" aria-label="previous month">‹</button>
         <button class="btn small ghost" id="mc-today">Today</button>
         <button class="btn small" id="mc-next" aria-label="next month">›</button>
@@ -632,11 +643,18 @@ function addChooser(presetDay) {
         </span>
         <span class="ap-txt"><b>To-do</b><small>Lives on the week board, tag it however you like</small></span>
       </button>
+      <button class="addpick-btn" id="ap-event">
+        <span class="ap-ico" style="background:color-mix(in srgb,${EVENT_DEFAULT_COLOR} 16%,var(--card));color:${EVENT_DEFAULT_COLOR}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+        </span>
+        <span class="ap-txt"><b>Event</b><small>Happens at a time — shows on your day like a class</small></span>
+      </button>
     </div>
     <div class="modal-actions"><button class="btn ghost" id="ap-cancel">Cancel</button></div>`);
   $("#ap-cancel").onclick = closeModal;
   $("#ap-asg").onclick = () => { closeModal(); assignmentEditor(null, presetDay); };
   $("#ap-todo").onclick = () => { closeModal(); taskEditor(null, presetDay); };
+  $("#ap-event").onclick = () => { closeModal(); eventEditor(null, presetDay); };
 }
 function arrBar(area) {
   const isMobile = window.innerWidth < 680;
@@ -683,7 +701,7 @@ function renderHome() {
   const myTasks = alive(S.tasks).filter(t => !t.done)
     .sort((a, b) => tkey(a).localeCompare(tkey(b)) || a.order - b.order).slice(0, 7);
   const dow = parseDate(today).getDay();
-  const daily = dailyItems(dow);
+  const daily = dailyItems(dow, today);
   const hasDaily = daily.anytime.length || daily.timed.length;
   const courses = alive(S.courses);
   const links = alive(S.links);
@@ -721,7 +739,7 @@ function renderHome() {
         : UI.dashDayOffset === 1 ? "Tomorrow"
         : UI.dashDayOffset === -1 ? "Yesterday"
         : niceDate(day);
-      const di = dailyItems(dDow);
+      const di = dailyItems(dDow, day);
       const any = di.anytime.length || di.timed.length;
       return `
       <h2>${esc(label)} <span style="display:flex;gap:5px;align-items:center">
@@ -875,8 +893,14 @@ function renderHome() {
     toggleRoutCheck(addDays(today, UI.dashDayOffset || 0), ck.dataset.hrck);
     renderHome();
   });
-  $$("#view-home [data-sched]").forEach(row => row.onclick = () => {
-    toggleRoutCheck(today, row.dataset.sched);
+  $$("#view-home [data-sched]").forEach(row => row.onclick = e => {
+    const id = row.dataset.sched;
+    /* clicking the body of an event opens it; the checkbox still checks it off */
+    if (!e.target.closest(".ck")) {
+      const evt = alive(S.events).find(x => x.id === id);
+      if (evt) { eventEditor(evt); return; }
+    }
+    toggleRoutCheck(addDays(today, UI.dashDayOffset || 0), id);
     renderHome();
   });
   /* to-dos on home — rows open editor on click */
@@ -893,6 +917,8 @@ function renderHome() {
   /* dashboard calendar: to-dos toggle */
   const dcTodotog = $("#dc-todotog");
   if (dcTodotog) dcTodotog.onclick = () => { UI.dashCalTodos = !UI.dashCalTodos; renderHome(); };
+  const dcAddEv = $("#dc-addevent");
+  if (dcAddEv) dcAddEv.onclick = e => { e.stopPropagation(); eventEditor(null); };
 }
 function linkEditor(l) {
   const isNew = !l;
@@ -1065,6 +1091,57 @@ function courseDetail(c) {
   $("#cd-del").onclick = () => confirmBox("Delete course?", `"${c.name}" will be removed. Its assignments stay, just uncategorized.`, "Delete", () => {
     c.deleted = true; c.updatedAt = Date.now(); save(); gcalQueuePush(); render(); toast("Course removed");
   }, true);
+}
+const EVENT_DEFAULT_COLOR = "#c8489a";
+/* One-off things with a time — dinners, appointments, games. Not deadlines
+   (assignments) and not habits (routines). */
+function eventEditor(ev, presetDate) {
+  const isNew = !ev;
+  const base = ev || { title: "", date: presetDate || todayStr(), start: "", end: "", location: "", color: EVENT_DEFAULT_COLOR, notes: "" };
+  let picked = base.color || EVENT_DEFAULT_COLOR;
+  openModal(`
+    <h2>${isNew ? "New event" : "Edit event"}</h2>
+    <div class="field"><label>What is it?</label><input id="ev-title" value="${esc(base.title)}" placeholder="e.g. Dentist, Concert, Dinner with Sam" autocomplete="off"></div>
+    <div class="field"><label>Date</label><input id="ev-date" type="date" value="${esc(base.date)}"></div>
+    <div class="fieldrow">
+      <div class="field"><label>Starts <span style="text-transform:none;font-weight:400">(optional)</span></label><input id="ev-start" type="time" value="${esc(base.start || "")}"></div>
+      <div class="field"><label>Ends <span style="text-transform:none;font-weight:400">(optional)</span></label><input id="ev-end" type="time" value="${esc(base.end || "")}"></div>
+    </div>
+    <span class="hint">Leave the times blank and it sits under "Anytime" for that day.</span>
+    <div class="field" style="margin-top:12px"><label>Where <span style="text-transform:none;font-weight:400">(optional)</span></label><input id="ev-loc" value="${esc(base.location || "")}" placeholder="Room, address, link…" autocomplete="off"></div>
+    <div class="field"><label>Color</label><div class="colorpick" id="ev-colors">
+      ${COLORS.map(col => `<button type="button" data-col="${col}" class="${col === picked ? "sel" : ""}" style="background:${col}" aria-label="color"></button>`).join("")}
+    </div></div>
+    <div class="field"><label>Notes</label><textarea id="ev-notes" placeholder="Anything worth remembering…">${esc(base.notes || "")}</textarea></div>
+    <div class="modal-actions">
+      ${isNew ? "" : `<button class="btn ghost danger" id="ev-del">Delete</button>`}
+      <span class="spacer"></span>
+      <button class="btn ghost" id="ev-cancel">Cancel</button>
+      <button class="btn primary" id="ev-save">${isNew ? "Add event" : "Save"}</button>
+    </div>`);
+  $$("#ev-colors button").forEach(b => b.onclick = () => {
+    picked = b.dataset.col;
+    $$("#ev-colors button").forEach(x => x.classList.toggle("sel", x === b));
+  });
+  $("#ev-cancel").onclick = closeModal;
+  if (!isNew) $("#ev-del").onclick = () => confirmBox("Delete event?", `"${ev.title}" will be removed.`, "Delete", () => {
+    ev.deleted = true; ev.updatedAt = Date.now(); save(); closeModal(); render(); toast("Deleted");
+  }, true);
+  $("#ev-save").onclick = () => {
+    const title = $("#ev-title").value.trim();
+    if (!title) { toast("Give it a name first"); return; }
+    const date = $("#ev-date").value;
+    if (!date) { toast("Pick a date"); return; }
+    const start = $("#ev-start").value;
+    let end = $("#ev-end").value;
+    /* an end with no start is meaningless — and end before start reads as a typo */
+    if (end && !start) end = "";
+    const data = { title, date, start, end, location: $("#ev-loc").value.trim(), color: picked, notes: $("#ev-notes").value.trim() };
+    if (isNew) S.events.push({ id: uid(), deleted: false, ...data, updatedAt: Date.now() });
+    else Object.assign(ev, data, { updatedAt: Date.now() });
+    save(); closeModal(); render(); toast(isNew ? "Event added" : "Saved");
+  };
+  $("#ev-title").focus();
 }
 const DAY_LETTERS = ["Su", "M", "Tu", "W", "Th", "F", "Sa"];
 /* A course can meet as several session types under the same course. */
@@ -1239,7 +1316,7 @@ function weekModeSeg() {
 /* Everything scheduled for one day, in one place: classes/routines, assignments due, to-dos. */
 function weekDayItems(day) {
   const dow = parseDate(day).getDay();
-  const { anytime, timed } = dailyItems(dow);
+  const { anytime, timed } = dailyItems(dow, day);
   return {
     timed,
     anytime,
@@ -1248,14 +1325,14 @@ function weekDayItems(day) {
   };
 }
 /* At the same clock time an assignment deadline matters before a class starts. */
-const WK_ORDER = { asg: 0, todo: 1, routine: 2, class: 3 };
+const WK_ORDER = { asg: 0, todo: 1, event: 2, routine: 3, class: 4 };
 /* Flatten a day into one chronological list of comparable entries. */
 function weekDayEntries(day) {
   const { timed, anytime, asg, tasks } = weekDayItems(day);
   const checks = S.routineChecks[day] || {};
   const out = [];
   for (const r of [...timed, ...anytime]) {
-    const type = r.kind === "class" ? "class" : "routine";
+    const type = r.kind === "class" ? "class" : r.kind === "event" ? "event" : "routine";
     out.push({
       type, id: r.id, title: r.title, color: r.color || "#8fa3ad",
       start: r.time ? MINS(r.time) : null,
@@ -1308,7 +1385,7 @@ function wkEntryHtml(e, day) {
       ${e.timeTxt ? `<span class="wk-time">${esc(e.timeTxt)}</span>` : ""}
     </div>`;
   }
-  return `<div class="wk-item ${e.done ? "done" : ""}" data-wsched="${e.id}" data-wday="${day}"
+  return `<div class="wk-item ${e.type === "event" ? "evt" : ""} ${e.done ? "done" : ""}" data-wsched="${e.id}" data-wday="${day}"
     style="background:color-mix(in srgb,${c} 13%,var(--card));border-left:3px solid ${c}">
     <span class="wk-t">${esc(e.title)}</span>
     ${e.timeTxt ? `<span class="wk-time">${esc(e.timeTxt)}</span>` : ""}
@@ -1430,6 +1507,8 @@ function renderWeekAgenda() {
       if (c) courseDetail(c);
       return;
     }
+    const evt = alive(S.events).find(x => x.id === id);
+    if (evt) { eventEditor(evt); return; }
     const rt = S.routines.find(x => x.id === id);
     if (rt) routineEditor(rt, parseDate(r.dataset.wday).getDay());
   });
@@ -1823,9 +1902,22 @@ function attachBoardEvents(boardEl) {
 /* ============================================================
    DAILY (routines, classes, schedule)
    ============================================================ */
-function dailyItems(dow) {
+/* Everything that sits on a day's schedule: repeating routines, course meetings,
+   and one-off events. `date` is optional — without it, events are skipped. */
+function dailyItems(dow, date) {
   const rs = alive(S.routines).filter(r => r.days.includes(dow));
   const timed = rs.filter(r => r.time).slice();
+  const untimedEvents = [];
+  if (date) {
+    for (const ev of alive(S.events).filter(e => e.date === date)) {
+      const item = {
+        id: ev.id, title: ev.title, kind: "event", isEvent: true,
+        room: ev.location || "", color: ev.color || EVENT_DEFAULT_COLOR,
+        time: ev.start || "", endTime: ev.end || "", order: 0,
+      };
+      if (ev.start) timed.push(item); else untimedEvents.push(item);
+    }
+  }
   /* course meeting times appear automatically as classes */
   for (const c of alive(S.courses)) {
     (c.meetings || []).forEach((m, i) => {
@@ -1842,7 +1934,11 @@ function dailyItems(dow) {
     });
   }
   timed.sort((a, b) => a.time.localeCompare(b.time) || (a.order || 0) - (b.order || 0));
-  return { anytime: rs.filter(r => !r.time).sort((a, b) => a.order - b.order), timed };
+  const anytime = [
+    ...rs.filter(r => !r.time).sort((a, b) => a.order - b.order),
+    ...untimedEvents,
+  ];
+  return { anytime, timed };
 }
 function timeRange(r) {
   return r.time ? fmtTime12(r.time) + (r.endTime ? "–" + fmtTime12(r.endTime) : "") : "";
@@ -1872,7 +1968,7 @@ function layoutLanes(items) {
 function schedTimelineHtml(date, ckAttr, includeAnytime = true) {
   const dow = parseDate(date).getDay();
   const checks = S.routineChecks[date] || {};
-  const { anytime, timed } = dailyItems(dow);
+  const { anytime, timed } = dailyItems(dow, date);
   if (!anytime.length && !timed.length) return "";
 
   const blocks = timed.map(r => {
@@ -1956,16 +2052,20 @@ function schedItemHtml(r, checked, ckAttr) {
       ${r.time ? `<span class="range">${timeRange(r)}</span>` : ""}
     </div>`;
   }
-  return `<div class="routline ${checked ? "done" : ""}" data-sched="${r.id}"${(r.color && !checked) ? ` style="background:color-mix(in srgb, ${esc(r.color)} 15%, transparent)"` : ""}>
+  /* events get a colored spine so they read as "something happening", not a habit */
+  const evStyle = r.kind === "event"
+    ? ` style="background:color-mix(in srgb, ${esc(r.color || EVENT_DEFAULT_COLOR)} 14%, var(--card));border-left:3px solid ${esc(r.color || EVENT_DEFAULT_COLOR)};padding-left:8px"`
+    : (r.color && !checked) ? ` style="background:color-mix(in srgb, ${esc(r.color)} 15%, transparent)"` : "";
+  return `<div class="routline ${r.kind === "event" ? "evt" : ""} ${checked ? "done" : ""}" data-sched="${r.id}"${evStyle}>
     <span class="ck ${checked ? "on" : ""}" ${ckAttr}="${r.id}"><svg viewBox="0 0 24 24"><path d="M4 12.5 10 18.5 20 6"/></svg></span>
-    <span class="rt">${esc(r.title)}</span>
+    <span class="rt">${esc(r.title)}${r.room ? `<span class="rt-where"> · ${esc(r.room)}</span>` : ""}</span>
     ${r.time ? `<span class="rtime">${timeRange(r)}</span>` : ""}
   </div>`;
 }
 function schedHtml(date, ckAttr, includeAnytime = true) {
   const dow = parseDate(date).getDay();
   const checks = S.routineChecks[date] || {};
-  const { anytime, timed } = dailyItems(dow);
+  const { anytime, timed } = dailyItems(dow, date);
   if (!anytime.length && !timed.length) return "";
   let html = "";
   if (includeAnytime && anytime.length) {
@@ -1992,7 +2092,7 @@ function renderRoutine() {
   const date = UI.routineDate;
   const dow = parseDate(date).getDay();
   const checks = S.routineChecks[date] || {};
-  const { anytime, timed } = dailyItems(dow);
+  const { anytime, timed } = dailyItems(dow, date);
   const asg = dueAssignments().filter(a => a.due === date);
   const dayTasks = alive(S.tasks).filter(t => t.day === date).sort((a, b) => a.order - b.order);
   const isToday = date === todayStr();
@@ -2006,6 +2106,7 @@ function renderRoutine() {
           <button class="btn small" id="rt-next" aria-label="next day">›</button>
           ${isToday ? "" : `<button class="btn small ghost" id="rt-today">Today</button>`}
         </div>
+        <button class="btn small" id="rt-addev">+ Event</button>
         <button class="btn primary small" id="rt-add">+ Routine</button>
       </div>
     </div>
@@ -2046,6 +2147,7 @@ function renderRoutine() {
   $("#rt-next").onclick = () => { UI.routineDate = addDays(date, 1); renderRoutine(); };
   if (!isToday) $("#rt-today").onclick = () => { UI.routineDate = todayStr(); renderRoutine(); };
   $("#rt-add").onclick = () => routineEditor(null, dow);
+  $("#rt-addev").onclick = () => eventEditor(null, date);
   $$("#view-routine [data-rck]").forEach(ck => ck.onclick = e => {
     e.stopPropagation();
     toggleRoutCheck(date, ck.dataset.rck);
@@ -2061,6 +2163,8 @@ function renderRoutine() {
     const id = row.dataset.sched;
     const cm = id.match(/^crs-(.+)-\d+$/);
     if (cm) { const c = courseById(cm[1]); if (c) courseDetail(c); return; }
+    const evt = alive(S.events).find(x => x.id === id);
+    if (evt) { eventEditor(evt); return; }
     const r = S.routines.find(x => x.id === id);
     if (r) routineEditor(r, dow);
   });
@@ -2295,11 +2399,20 @@ function renderCalMonth() {
         const ds = fmtDate(d);
         const inMonth = d.getMonth() === m;
         const evs = byDay[ds] || [];
+        const dayEvents = alive(S.events).filter(e => e.date === ds);
+        const total = evs.length + dayEvents.length;
+        const chips = [
+          ...evs.slice(0, 3).map(a => `<span class="calev ${a.status === "Done" ? "struck" : ""}" style="background:${asgAccent(a)}">${typeGlyph(a.type, 9)}${esc(a.title)}</span>`),
+          ...dayEvents.slice(0, Math.max(0, 3 - evs.length)).map(ev => `<span class="calev" style="background:${ev.color || EVENT_DEFAULT_COLOR}">◷ ${esc(ev.title)}</span>`),
+        ];
         return `<div class="calcell ${inMonth ? "" : "dim"} ${ds === today ? "today" : ""}" data-day="${ds}">
           <span class="dnum">${d.getDate()}</span>
-          ${evs.slice(0, 3).map(a => `<span class="calev ${a.status === "Done" ? "struck" : ""}" style="background:${asgAccent(a)}">${typeGlyph(a.type, 9)}${esc(a.title)}</span>`).join("")}
-          ${evs.length > 3 ? `<span class="calmore">+${evs.length - 3} more</span>` : ""}
-          <span class="dotbar">${evs.slice(0, 6).map(a => `<span class="evdot" style="background:${asgAccent(a)};${a.status === "Done" ? "opacity:.35" : ""}"></span>`).join("")}</span>
+          ${chips.join("")}
+          ${total > chips.length ? `<span class="calmore">+${total - chips.length} more</span>` : ""}
+          <span class="dotbar">${[
+            ...evs.slice(0, 6).map(a => `<span class="evdot" style="background:${asgAccent(a)};${a.status === "Done" ? "opacity:.35" : ""}"></span>`),
+            ...dayEvents.slice(0, Math.max(0, 6 - evs.length)).map(ev => `<span class="evdot" style="background:${ev.color || EVENT_DEFAULT_COLOR}"></span>`),
+          ].join("")}</span>
         </div>`;
       }).join("")}
     </div>`;
@@ -2311,8 +2424,22 @@ function renderCalMonth() {
 function dayModal(day) {
   const evs = dueAssignments().filter(a => a.due === day);
   const tasks = alive(S.tasks).filter(t => t.day === day);
+  const events = alive(S.events).filter(e => e.date === day)
+    .sort((a, b) => (a.start || "99").localeCompare(b.start || "99"));
   openModal(`
     <h2>${niceDate(day)}</h2>
+    ${events.length ? `
+      <div style="font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint);margin:0 0 4px">Events</div>
+      <div class="duelist" style="margin-bottom:10px">
+        ${events.map(ev => {
+          const c = ev.color || EVENT_DEFAULT_COLOR;
+          return `<div class="duerow" data-evrow="${ev.id}" style="background:color-mix(in srgb,${c} 13%,var(--card));border-color:color-mix(in srgb,${c} 36%,var(--line))">
+            <span class="bar" style="background:${c}"></span>
+            <span class="t">${esc(ev.title)}</span>
+            <span class="when">${ev.start ? esc(fmtTime12(ev.start)) + (ev.end ? "–" + esc(fmtTime12(ev.end)) : "") : "anytime"}</span>
+          </div>`;
+        }).join("")}
+      </div>` : ""}
     <div class="duelist" style="margin-bottom:4px">
       ${evs.length ? evs.map(dueRowHtml).join("") : `<div class="empty" style="margin:6px 0">No assignments due.</div>`}
     </div>
@@ -2323,10 +2450,16 @@ function dayModal(day) {
       </div>` : ""}
     <div class="modal-actions">
       <button class="btn ghost" id="dm-close">Close</button>
-      <button class="btn primary" id="dm-add">+ Add here</button>
+      <button class="btn" id="dm-addev">+ Event</button>
+      <button class="btn primary" id="dm-add">+ Assignment</button>
     </div>`);
   $("#dm-close").onclick = closeModal;
   $("#dm-add").onclick = () => assignmentEditor(null, day);
+  $("#dm-addev").onclick = () => eventEditor(null, day);
+  $$("#modal [data-evrow]").forEach(r => r.onclick = () => {
+    const ev = S.events.find(x => x.id === r.dataset.evrow);
+    if (ev) eventEditor(ev);
+  });
   $$("#modal [data-asg]").forEach(r => r.onclick = () => {
     const a = S.assignments.find(x => x.id === r.dataset.asg);
     if (a) assignmentDetail(a);
@@ -2867,7 +3000,7 @@ async function supaFetch(method, query, body) {
 function sharedState() {
   return {
     courses: S.courses, assignments: S.assignments, tasks: S.tasks,
-    routines: S.routines, links: S.links, tags: S.tags, tagsMeta: S.tagsMeta,
+    routines: S.routines, events: S.events, links: S.links, tags: S.tags, tagsMeta: S.tagsMeta,
     typeColors: S.typeColors, typeColorsU: S.typeColorsU,
     customTypes: S.customTypes, customTypesU: S.customTypesU,
     routineChecks: S.routineChecks, routineCheckMeta: S.routineCheckMeta,
@@ -2875,7 +3008,7 @@ function sharedState() {
 }
 function mergeRemote(remote) {
   let changed = false;
-  for (const key of ["courses", "assignments", "tasks", "routines", "links"]) {
+  for (const key of ["courses", "assignments", "tasks", "routines", "events", "links"]) {
     const localArr = S[key];
     const byId = new Map(localArr.map(x => [x.id, x]));
     for (const r of (remote[key] || [])) {

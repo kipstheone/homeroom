@@ -564,6 +564,10 @@ html{background:var(--bg)}
 .routline .ck svg{width:11px;height:11px}
 .routline.done .rt{text-decoration:line-through;color:var(--ink-faint)}
 .routline .rtime{font-size:11px;font-weight:800;color:var(--ink-faint);margin-left:auto;white-space:nowrap}
+/* one-off events: a colored spine distinguishes them from repeating routines */
+.routline.evt{border-radius:8px;padding-top:7px;padding-bottom:7px}
+.routline .rt-where{font-weight:600;color:var(--ink-faint);font-size:12.5px}
+.wk-item.evt .wk-t::before{content:"◷ ";opacity:.6;font-weight:400}
 .sched-anytime{font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint);padding:2px 0 4px}
 
 /* ---------- time-scaled day timeline (Daily view) ---------- */
