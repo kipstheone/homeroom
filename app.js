@@ -2,7 +2,7 @@
 /* ============================================================
    ODO — app logic
    ============================================================ */
-const APP_VERSION = "v1.7.0";
+const APP_VERSION = "v1.7.1";
 
 /* ---------- tiny helpers ---------- */
 const $ = s => document.querySelector(s);
@@ -217,7 +217,7 @@ function nav(view) {
     home: () => addChooser(),
     week: () => taskEditor(null),
     routine: () => routineEditor(null, parseDate(UI.routineDate).getDay()),
-    calendar: () => assignmentEditor(null),
+    calendar: () => addChooser(null, ["asg", "event"]),
     courses: () => courseEditor(null),
   };
   const fab = $("#fab");
@@ -497,6 +497,21 @@ function dueRowHtml(a) {
     <span class="when" ${urgent ? 'style="color:var(--danger)"' : ""}>${whenTxt}${a.time ? " " + fmtTime12(a.time) : ""}</span>
   </div>`;
 }
+/* An event styled to sit in the Coming up list beside assignment rows. */
+function eventDueRowHtml(ev) {
+  const c = ev.color || EVENT_DEFAULT_COLOR;
+  const dd = dayDiff(todayStr(), ev.date);
+  const whenTxt = relDay(ev.date) + (ev.start ? " " + fmtTime12(ev.start) : "");
+  const fill = S.settings.dueStyle === "fill";
+  const rowStyle = fill ? ` style="background:color-mix(in srgb, ${c} 14%, var(--card));border-color:color-mix(in srgb, ${c} 38%, var(--line))"` : "";
+  return `<div class="duerow" data-evrow="${ev.id}"${rowStyle}>
+    <span class="bar" style="background:${c}"></span>
+    ${fill ? "" : `<span class="duedot" style="background:${c}"></span>`}
+    <span class="t">${esc(ev.title)}</span>
+    <span class="chip" style="background:color-mix(in srgb, ${c} 18%, var(--card));color:color-mix(in srgb, ${c} 62%, var(--ink))">◷ Event</span>
+    <span class="when" ${dd === 0 ? 'style="color:var(--danger)"' : ""}>${whenTxt}</span>
+  </div>`;
+}
 function dashCalHtml() {
   if (!UI.homeCal) { const d = new Date(); UI.homeCal = [d.getFullYear(), d.getMonth()]; }
   const [y, m] = UI.homeCal;
@@ -626,35 +641,38 @@ function startClock() {
     el.textContent = clockNow();
   }, 1000);
 }
-/* "+ Add" on the dashboard: assignment or to-do? */
-function addChooser(presetDay) {
+/* "+ Add": which kind of thing? `choices` limits the options — the calendar
+   offers assignment/event, the dashboard offers all three. */
+function addChooser(presetDay, choices = ["asg", "todo", "event"]) {
+  const show = k => choices.includes(k);
   openModal(`
     <h2>What are you adding?</h2>
     <div class="addpick">
-      <button class="addpick-btn" id="ap-asg">
+      ${show("asg") ? `<button class="addpick-btn" id="ap-asg">
         <span class="ap-ico" style="background:var(--accent-soft);color:var(--accent-ink)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4M16 2v4M3 10h18"/><rect x="3" y="4" width="18" height="18" rx="2"/></svg>
         </span>
         <span class="ap-txt"><b>Assignment</b><small>Has a due date, syncs to Google Calendar</small></span>
-      </button>
-      <button class="addpick-btn" id="ap-todo">
+      </button>` : ""}
+      ${show("todo") ? `<button class="addpick-btn" id="ap-todo">
         <span class="ap-ico" style="background:color-mix(in srgb,var(--ink) 8%,var(--card));color:var(--ink-soft)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
         </span>
         <span class="ap-txt"><b>To-do</b><small>Lives on the week board, tag it however you like</small></span>
-      </button>
-      <button class="addpick-btn" id="ap-event">
+      </button>` : ""}
+      ${show("event") ? `<button class="addpick-btn" id="ap-event">
         <span class="ap-ico" style="background:color-mix(in srgb,${EVENT_DEFAULT_COLOR} 16%,var(--card));color:${EVENT_DEFAULT_COLOR}">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
         </span>
         <span class="ap-txt"><b>Event</b><small>Happens at a time — shows on your day like a class</small></span>
-      </button>
+      </button>` : ""}
     </div>
     <div class="modal-actions"><button class="btn ghost" id="ap-cancel">Cancel</button></div>`);
   $("#ap-cancel").onclick = closeModal;
-  $("#ap-asg").onclick = () => { closeModal(); assignmentEditor(null, presetDay); };
-  $("#ap-todo").onclick = () => { closeModal(); taskEditor(null, presetDay); };
-  $("#ap-event").onclick = () => { closeModal(); eventEditor(null, presetDay); };
+  const wire = (sel, fn) => { const b = $(sel); if (b) b.onclick = () => { closeModal(); fn(); }; };
+  wire("#ap-asg", () => assignmentEditor(null, presetDay));
+  wire("#ap-todo", () => taskEditor(null, presetDay));
+  wire("#ap-event", () => eventEditor(null, presetDay));
 }
 function arrBar(area) {
   const isMobile = window.innerWidth < 680;
@@ -697,6 +715,18 @@ function renderHome() {
     tests: open.filter(a => (a.type === "Test" || a.type === "Quiz") && dayDiff(today, a.due) >= 0 && dayDiff(today, a.due) <= lookahead),
   };
   const list = tabs[UI.dashTab] || tabs.tomorrow;
+  /* events share the Coming up list — but not the Tests tab, which is course-only */
+  const upEvents = alive(S.events).filter(e => dayDiff(today, e.date) >= 0);
+  const evTabs = {
+    tomorrow: upEvents.filter(e => dayDiff(today, e.date) <= 1),
+    week: upEvents.filter(e => dayDiff(today, e.date) <= 7),
+    tests: [],
+  };
+  /* interleave by date+time so a 3pm event lands after a noon deadline */
+  const comingRows = [
+    ...list.map(a => ({ k: a.due + " " + (a.time || "99:99"), html: dueRowHtml(a) })),
+    ...(evTabs[UI.dashTab] || evTabs.tomorrow).map(e => ({ k: e.date + " " + (e.start || "99:99"), html: eventDueRowHtml(e) })),
+  ].sort((x, y) => x.k.localeCompare(y.k));
   const tkey = t => t.day === "someday" ? "9999-99-99" : t.day;
   const myTasks = alive(S.tasks).filter(t => !t.done)
     .sort((a, b) => tkey(a).localeCompare(tkey(b)) || a.order - b.order).slice(0, 7);
@@ -719,14 +749,14 @@ function renderHome() {
       </div>`,
     calendar: dashCalHtml(),
     coming: `
-      <h2>Coming up deadlines <button class="seemore" id="due-style-toggle">style: ${S.settings.dueStyle === "fill" ? "filled" : "dots"}</button></h2>
+      <h2>Coming up <button class="seemore" id="due-style-toggle">style: ${S.settings.dueStyle === "fill" ? "filled" : "dots"}</button></h2>
       <div class="dash-tabs">
         <button data-dtab="tomorrow" class="${UI.dashTab === "tomorrow" ? "active" : ""}">By tomorrow</button>
         <button data-dtab="week" class="${UI.dashTab === "week" ? "active" : ""}">Next 7 days</button>
         <button data-dtab="tests" class="${UI.dashTab === "tests" ? "active" : ""}">Tests · ${lookahead}d</button>
       </div>
       <div class="duelist">
-        ${list.length ? list.map(dueRowHtml).join("") : `<div class="empty">${emptyLine(1 + parseDate(today).getDate())}</div>`}
+        ${comingRows.length ? comingRows.map(r => r.html).join("") : `<div class="empty">${emptyLine(1 + parseDate(today).getDate())}</div>`}
       </div>`,
     courses: `
       <h2>Courses <button class="seemore" data-go="courses">manage</button></h2>
@@ -907,6 +937,10 @@ function renderHome() {
   $$("#view-home [data-trow]").forEach(r => r.onclick = () => {
     const t = S.tasks.find(x => x.id === r.dataset.trow);
     if (t) taskEditor(t);
+  });
+  $$("#view-home [data-evrow]").forEach(r => r.onclick = () => {
+    const ev = S.events.find(x => x.id === r.dataset.evrow);
+    if (ev) eventEditor(ev);
   });
   /* todo-style toggle on weektasks panel */
   const todoStyleBtn = $("#todo-style-toggle");
@@ -2304,11 +2338,11 @@ function renderCalendar() {
           <button data-cm="list" class="${UI.calMode === "list" ? "active" : ""}">All</button>
           <button data-cm="todos" class="${UI.calMode === "todos" ? "active" : ""}">To-dos</button>
         </div>
-        <button class="btn primary small" id="cal-add">+ Assignment</button>
+        <button class="btn primary small" id="cal-add">+ Add</button>
       </div>
     </div>
     <div id="cal-body"></div>`;
-  $("#cal-add").onclick = () => assignmentEditor(null);
+  $("#cal-add").onclick = () => addChooser(null, ["asg", "event"]);
   $$("#cal-seg button").forEach(b => b.onclick = () => { UI.calMode = b.dataset.cm; renderCalendar(); });
   if (UI.calMode === "month") renderCalMonth();
   else if (UI.calMode === "table") renderCalTable();
